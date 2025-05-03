@@ -3,50 +3,44 @@
 ## 1. App Overview
 
 **Goal:**
-Accelerate the high-quality development of thoughtful blog content by automating research and layered review processes. Human authorship is preserved for ideation and writing.
+Accelerate the high-quality development of thoughtful blog content by automating deep research and multi-layered review processes. Human authorship is preserved for ideation and writing.
 
 **Summary:**
 This application assists writers in two distinct phases:
 
-* **Research Mode:** Breaks down a topic, gathers data, evaluates solutions, and produces comprehensive research documentation.
-* **Review Mode:** Assesses a written blog post across factual correctness, writing clarity, and grammar, enabling structured iteration and improvement.
+* **Research Mode:** Performs exhaustive topic breakdown (industry, solution, paradigm, audience), gathers extensive data with visual assets, evaluates solutions, and produces comprehensive research documentation.
+* **Review Mode:** Conducts three-stage review process (factual verification with multiple sources, multi-persona style review, grammar correction) with user approval gates between stages.
 
 **Deployment Target:**
 
 * Docker container
 * Ubuntu-based Linux machine
 * Access to OpenAI and/or Groq APIs for LLM capabilities
-* MongoDB for persistent storage of user history, style references, and full content archives (markdown, images, post revisions)
+* MongoDB for persistent storage of complex research data, user history, style references, and full content archives (markdown, images, post revisions)
+* Firecrawl MCP for visual asset collection
+* Opik MCP for agent observability
 
 ---
 
 ## 2. User Flows
 
-### Researcher Flow
+### Researcher Flow (Enhanced)
 
 ```mermaid
 graph TD;
-    A[Accepts New Topics] --> B[Breaks Down Topic];
-    B --> D[Industry or System Affected];
-    D --> E[Proposed Solution];
-    D --> F[Current Dominant Paradigm];
+    A[Accepts New Topics] --> B[Topic Validation & Planning];
+    B --> D[Industry/System Analysis - 10+ challenges];
+    B --> E[Proposed Solution - 5-10 arguments];
+    B --> F[Current Paradigm - Historical Context];
+    B --> G[Audience Analysis - Knowledge Gaps];
 
-    D --> G[Audience Analysis];
-    E --> G;
-    F --> G;
-
-    D --> I[Readiness Score];
-    E --> I;
-    F --> I;
-    G --> I;
-
-    D --> H[Store Images/Content];
-    E --> H;
-    F --> H;
-
-    I --> Report([Final Markdown Report]);
-    H --> Report;
-
+    D & E & F --> H[Visual Asset Collection - 50-100 assets];
+    G --> I[Analogy Generation - 3 per category];
+    H & I --> J[Research Integration];
+    
+    J --> K[Readiness Score - Letter Grade];
+    K --> L[Final Markdown Report];
+    
     style A fill:#fff,stroke:#333,stroke-width:1px,color:#000
     style B fill:#fff,stroke:#333,stroke-width:1px,color:#000
     style D fill:#fff,stroke:#333,stroke-width:1px,color:#000
@@ -55,31 +49,44 @@ graph TD;
     style G fill:#fff,stroke:#333,stroke-width:1px,color:#000
     style H fill:#fff,stroke:#333,stroke-width:1px,color:#000
     style I fill:#fff,stroke:#333,stroke-width:1px,color:#000
-    style Report fill:#fff,stroke:#333,stroke-width:1px,color:#000
+    style J fill:#fff,stroke:#333,stroke-width:1px,color:#000
+    style K fill:#fff,stroke:#333,stroke-width:1px,color:#000
+    style L fill:#fff,stroke:#333,stroke-width:1px,color:#000
 ```
 
-### Reviewer Flow
+### Reviewer Flow (Enhanced)
 
 ```mermaid
 graph TD
-    A[Blog Post Uploaded] --> B[Step 1: Analyze Claims & Evidence];
-    B --> C[Notify User: Review 1 Ready];
+    A[Blog Post Uploaded] --> B[Step 1: Factual Review];
+    B --> B1[Extract Claims];
+    B1 --> B2[Find 3 Supporting & 3 Contradicting Sources];
+    B2 --> B3[Generate Consensus Score 1-10];
+    B3 --> B4[Create Table View of Claims];
+    B4 --> C[Notify User: Review 1 Ready];
+    
     C --> D{User Reviews Step 1 Feedback};
 
-    D -- Approve & Trigger Next --> E[Step 2: Swarm of Authors Review Style];
-    D -- Revise Draft Needs Re-Review --> B;
+    D -- Approve & Trigger Next --> E[Step 2: Multi-Persona Style Review];
+    D -- Revise Draft Needs Re-Review --> A;
 
-    E --> F[Notify User: Review 2 Ready];
+    E --> E1[Run 6 Reviewer Personas];
+    E1 --> E2[Generate Tabular Feedback];
+    E2 --> F[Notify User: Review 2 Ready];
+    
     F --> G{User Reviews Step 2 Feedback};
 
     G -- Approve & Trigger Next --> H[Step 3: Grammar Review];
-    G -- Revise Draft Needs Re-Review --> B;
+    G -- Revise Draft Needs Re-Review --> A;
 
-    H --> I[Notify User: Review 3 Ready];
+    H --> H1[Run Grammar Analysis];
+    H1 --> H2[Generate Inline Suggestions];
+    H2 --> I[Notify User: Review 3 Ready];
+    
     I --> J{User Reviews Step 3 Feedback};
 
     J -- Approve & Release --> K[User Marks Blog as Released];
-    J -- Revise Draft Needs Re-Review --> B;
+    J -- Revise Draft Needs Re-Review --> A;
 
     K --> L[End Process];
 
@@ -108,15 +115,16 @@ graph TD
 * **OpenAI API (GPT-4 / Embeddings)** – [https://platform.openai.com/docs](https://platform.openai.com/docs)
 * **Groq API (Mixtral/LLaMA)** – [https://groq.com/docs](https://groq.com/docs)
 * **Cohere (Embeddings)** – [https://docs.cohere.com/docs](https://docs.cohere.com/docs)
-* **Brave Search MCP API (Images + Web Results)** – [https://search.brave.com/help/api](https://search.brave.com/help/api)
+* **Brave Search MCP API (Premium Tier)** – [https://search.brave.com/help/api](https://search.brave.com/help/api)
 * **Firecrawl MCP Server (Web Scraping & Visual Asset Retrieval)** – [https://firecrawl.dev](https://firecrawl.dev)
+* **Academic APIs** – For authoritative source validation
 
 ### Tools and Components
 
 * **Sequential Reasoning:** LangGraph (preferred within LangChain)
 * **Memory Store:** MongoDB with LangChain vector store wrappers
-* **Content Storage:** MongoDB document store for markdown, images (as references or base64), and post revisions
-* **Debugging/Monitoring:** Opik MCP server for logging, context visualization, and agent traceability – [https://opik.ai](https://opik.ai) (or internal fork)
+* **Content Storage:** Enhanced MongoDB schema for complex research data, media assets, and version control
+* **Debugging/Monitoring:** Opik MCP server for logging, context visualization, and agent traceability – [https://opik.ai](https://opik.ai)
 
 ### Notifications
 
@@ -143,54 +151,72 @@ CMD ["python", "main.py"]
 
 **Dockerfile Recommendations:**
 
-* Use multi-stage builds if using heavy NLP dependencies (e.g. for PDF/image parsing)
-* Include `.env` support for secret keys and model API tokens
-* Expose FastAPI on port 8080 or 8000
-* Mount a shared `/logs` folder for easy inspection of logs (or pipe to Opik MCP)
+* Use multi-stage builds for heavy NLP dependencies
+* Include `.env` support for API tokens with expanded API keys for research depth
+* Expose FastAPI on port 8080
+* Mount shared folders for logs and content storage
 
-**Docker Compose (Optional):**
+**Docker Compose:**
 
 * MongoDB service
-* LLM agent gateway proxy (if needed)
-* LangServe / Opik MCP dashboards
+* Firecrawl MCP (for visual asset gathering)
+* Opik MCP (for agent tracing and debugging)
 
 ---
 
 ## 4. Core Features
 
-### Research Mode
+### Research Mode (Enhanced)
 
 * Topic intake and validation
-* Topic decomposition
-* System and solution evaluation
-* Dominant paradigm assessment
-* Audience knowledge bridging
-* Visual and multimedia scraping
-* Readiness scoring
+* Hierarchical topic decomposition
+* Industry analysis (10+ critical challenges with sources)
+* Solution evaluation (5-10 pro arguments, 5-10 counter arguments)
+* Current paradigm assessment (historical context, 2-3 alternatives)
+* Audience knowledge mapping (glossary, knowledge gaps)
+* Visual asset collection (50-100 relevant visuals)
+* Analogy generation (3 per category)
+* Readiness scoring (letter grade A-F)
 
-### Review Mode
+### Review Mode (Enhanced)
 
-* Claim identification and fact check
-* Opinion vs. evidence mapping
-* Reviewer personas (writing style feedback)
-* Structured table output for disagreements
-* Grammar check with reason classification
-* Review progress tracking and triggering
+* Three-stage review process with user approval gates
+* **Factual Review:**
+  * Claim identification and extraction
+  * 3 supporting + 3 contradicting sources per claim
+  * Consensus scoring (1-10 scale)
+  * Tabular claim assessment
+* **Style Review:**
+  * 6 distinct reviewer personas:
+    * Packy Mckormic
+    * Edward Tufte
+    * Casey Handmer
+    * Paul Graham
+    * Naval
+    * Xavier Dedenbach
+  * Persona-based writing style assessment
+  * Structured table with critique categories
+* **Grammar Review:**
+  * Comprehensive grammar check
+  * Inline suggestion format
+  * Categorized fixes (confidence, clarity, grammar)
 
 ---
 
 ## 5. In Scope vs Out of Scope
 
-| Feature                    | In Scope                       | Out of Scope                   |
-| -------------------------- | ------------------------------ | ------------------------------ |
-| Research automation        | ✅                              | ❌                              |
-| Multi-agent review         | ✅                              | ❌                              |
-| Human authoring interface  | ❌                              | ✅ (writing happens externally) |
-| Web UI                     | ❌ (CLI or minimal API assumed) | ✅                              |
-| Notion webhook integration | ✅ (future milestone)           | ❌                              |
-| Real-time feedback         | ❌ (asynchronous only)          | ✅                              |
-| Image generation           | ❌ (image collection only)      | ✅                              |
-| Grammar & style correction | ✅                              | ❌ (does not auto-rewrite text) |
+| Feature                     | In Scope                       | Out of Scope                    |
+|---------------------------- | ------------------------------ | ------------------------------- |
+| Deep research automation    | ✅                              | ❌                              |
+| Multi-persona review        | ✅                              | ❌                              |
+| Visual asset collection     | ✅                              | ❌                              |
+| Analogy generation          | ✅                              | ❌                              |
+| Human authoring interface   | ❌                              | ✅ (writing happens externally) |
+| Web UI                      | ❌ (CLI or minimal API assumed) | ✅                              |
+| Notion webhook integration  | ✅ (future milestone)           | ❌                              |
+| Real-time feedback          | ❌ (asynchronous only)          | ✅                              |
+| Image generation            | ❌ (image collection only)      | ✅                              |
+| Grammar & style correction  | ✅                              | ❌ (does not auto-rewrite text) |
 
 ---
 
@@ -216,6 +242,7 @@ services:
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - OPIK_SERVER=http://opik:7000
       - FIRECRAWL_SERVER=http://firecrawl:4000
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
     depends_on:
       - mongo
       - opik
@@ -263,6 +290,9 @@ GROQ_API_KEY=grq-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # MongoDB
 MONGODB_URI=mongodb://mongo:27017
 
+# Brave Search (Premium Tier)
+BRAVE_API_KEY=brv-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
 # SendGrid
 SENDGRID_API_KEY=SG.xxxxxxxxxxxxxxxxxxxxxxxxxx
 
@@ -282,13 +312,30 @@ APP_ENV=development
 
 ### Purpose
 
-To track and trigger transitions between review stages using a reliable, structured YAML file named `blog_title_review_tracker.yaml`, instead of freeform markdown.
+Track and trigger transitions between review stages using a structured YAML file.
 
-### `blog_title_review_tracker.yaml` Example
+### Enhanced YAML Structure
 
 ```yaml
 blog_title: "why-microgrids-will-replace-utilities"
 current_version: 3
+
+research_data:
+  industry_analysis:
+    challenges_count: 12
+    sources_count: 24
+  proposed_solution:
+    pro_arguments_count: 8
+    counter_arguments_count: 6
+    metrics_count: 7
+    visual_assets_count: 67
+  current_paradigm:
+    origin_year: 1982
+    alternatives_count: 3
+  audience_analysis:
+    knowledge_gaps_count: 5
+    acronyms_count: 14
+    analogies_count: 6
 
 review_pipeline:
   factual_review:
@@ -296,18 +343,22 @@ review_pipeline:
     completed_by: "agent"
     result_file: "why-microgrids_review1.md"
     timestamp: 2024-05-02T20:31:00Z
+    claims_analyzed: 24
+    avg_consensus_score: 7.3
 
   style_review:
     complete: false
     completed_by: null
     result_file: null
     timestamp: null
+    personas_used: []
 
   grammar_review:
     complete: false
     completed_by: null
     result_file: null
     timestamp: null
+    issues_identified: 0
 
 final_release:
   complete: false
@@ -317,25 +368,123 @@ final_release:
 
 ### How It Works
 
-1. The user **approves a stage** by setting `complete: true` on the next review section.
-2. A background agent (watcher or polling script) parses the YAML file.
-3. The agent **confirms prior stages are complete** before running the new stage.
-4. If valid, the next review process is triggered, and the YAML is updated.
+1. Research data is recorded in the YAML to track research depth
+2. User **approves a stage** by setting `complete: true` on the next review section
+3. Agent validates stage transitions and enforces completion order
+4. Statistical data is tracked for each stage
 
-### Benefits
+### CLI Tool
 
-* Machine-parseable
-* Easier to validate than markdown checkboxes
-* Prevents accidental stage skipping or corruption
-
-### Optional CLI Tool
-
-To prevent YAML syntax errors, users can instead run:
+To prevent YAML syntax errors, users can run:
 
 ```bash
 ./agent approve-review --stage style_review
 ```
 
-This will update the file safely and trigger the correct action.
+---
+
+## 8. Data Model (MongoDB)
+
+### Enhanced Schema for Research Depth
+
+#### Blog Document:
+```json
+{
+  "title": "string",
+  "current_version": "number",
+  "versions": [
+    {
+      "version": "number",
+      "content": "string",
+      "research": {
+        "industry_analysis": [
+          {
+            "challenge": "string",
+            "details": "string",
+            "sources": ["array of source objects"]
+          }
+        ],
+        "proposed_solution": {
+          "pro_arguments": ["array of argument objects"],
+          "counter_arguments": ["array of argument objects"],
+          "metrics": ["array of metric objects"]
+        },
+        "current_paradigm": {
+          "origin_date": "date",
+          "previous_paradigm": "object",
+          "arguments": ["array of argument objects"],
+          "alternatives": ["array of alternative objects"]
+        },
+        "audience_analysis": {
+          "knowledge_gaps": ["array of gap objects"],
+          "acronyms": ["array of acronym objects"],
+          "analogies": {
+            "challenges": ["array of analogy objects"],
+            "solutions": ["array of analogy objects"]
+          }
+        }
+      },
+      "review_status": {
+        "factual": {
+          "complete": "boolean",
+          "claims": [
+            {
+              "text": "string",
+              "line_numbers": "array of numbers",
+              "supporting_evidence": ["array of source objects"],
+              "contradicting_evidence": ["array of source objects"],
+              "consensus_score": "number (1-10)"
+            }
+          ]
+        },
+        "style": {
+          "complete": "boolean",
+          "reviews": [
+            {
+              "persona": "string",
+              "section": "string",
+              "disagreement_type": "string",
+              "point": "string",
+              "severity": "string"
+            }
+          ]
+        },
+        "grammar": {
+          "complete": "boolean",
+          "suggestions": ["array of suggestion objects"]
+        }
+      }
+    }
+  ]
+}
+```
+
+#### Media Asset Document:
+```json
+{
+  "blog_title": "string",
+  "version": "number",
+  "category": "string (industry/solution/paradigm)",
+  "type": "string (photo/video/infographic)",
+  "source": "string",
+  "url": "string",
+  "alt_text": "string",
+  "stored_base64": "string"
+}
+```
+
+#### Persona Model Document:
+```json
+{
+  "name": "string",
+  "writing_samples": ["array of text samples"],
+  "style_preferences": {
+    "sentence_length": "string",
+    "vocabulary_complexity": "string",
+    "structural_preferences": "string",
+    "tone": "string"
+  }
+}
+```
 
 ---

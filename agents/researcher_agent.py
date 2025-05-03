@@ -7,6 +7,12 @@ This agent:
 3. Calls Brave MCP for citations
 4. Stores outputs to review_files and media in MongoDB
 5. Assigns readiness score
+6. Implements enhanced research capabilities:
+   - 10+ industry/system challenges
+   - 5-10 supporting/opposing arguments for solutions
+   - Historical paradigm analysis
+   - Visual asset collection (50-100 assets)
+   - Analogy generation
 """
 
 import os
@@ -14,6 +20,7 @@ import re
 import json
 import logging
 import argparse
+import asyncio
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
 import requests
@@ -25,6 +32,17 @@ from agents.utilities.file_ops import (
     read_markdown_file, parse_image_references, 
     detect_version_from_filename, FileOpsError,
     collect_blog_assets, process_blog_upload
+)
+from agents.utilities.source_validator import SourceValidator
+from agents.utilities.firecrawl_client import FirecrawlClient
+
+# Import research components
+from agents.research import (
+    IndustryAnalyzer,
+    SolutionAnalyzer,
+    ParadigmAnalyzer,
+    AudienceAnalyzer,
+    AnalogyGenerator
 )
 
 # Configure logging
@@ -55,6 +73,9 @@ class ResearcherAgent:
         self,
         mongodb_uri: Optional[str] = None,
         brave_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        groq_api_key: Optional[str] = None,
+        firecrawl_server: Optional[str] = None,
         opik_server: Optional[str] = None
     ):
         """
@@ -63,6 +84,9 @@ class ResearcherAgent:
         Args:
             mongodb_uri: MongoDB connection URI
             brave_api_key: API key for Brave Search API
+            openai_api_key: API key for OpenAI
+            groq_api_key: API key for Groq
+            firecrawl_server: URL for Firecrawl MCP server
             opik_server: URL for Opik MCP server
         """
         # Initialize database connection
@@ -70,18 +94,75 @@ class ResearcherAgent:
         
         # Get API keys from environment if not provided
         self.brave_api_key = brave_api_key or os.environ.get("BRAVE_API_KEY")
+        self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
+        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY")
+        
         if not self.brave_api_key:
             logger.warning("Brave API key not provided. Citation gathering will be limited.")
             
         # Get Opik server from environment if not provided
         self.opik_server = opik_server or os.environ.get("OPIK_SERVER")
+        self.firecrawl_server = firecrawl_server or os.environ.get("FIRECRAWL_SERVER")
+        
+        # Initialize source validator and firecrawl client
+        self.source_validator = SourceValidator(brave_api_key=self.brave_api_key)
+        self.firecrawl_client = FirecrawlClient(
+            server_url=self.firecrawl_server,
+            brave_api_key=self.brave_api_key
+        )
+        
+        # Initialize all research components
+        self.industry_analyzer = IndustryAnalyzer(
+            openai_api_key=self.openai_api_key,
+            groq_api_key=self.groq_api_key,
+            source_validator=self.source_validator
+        )
+        
+        self.solution_analyzer = SolutionAnalyzer(
+            openai_api_key=self.openai_api_key,
+            groq_api_key=self.groq_api_key,
+            source_validator=self.source_validator
+        )
+        
+        self.paradigm_analyzer = ParadigmAnalyzer(
+            openai_api_key=self.openai_api_key,
+            groq_api_key=self.groq_api_key,
+            source_validator=self.source_validator
+        )
+        
+        self.audience_analyzer = AudienceAnalyzer(
+            openai_api_key=self.openai_api_key,
+            groq_api_key=self.groq_api_key,
+            source_validator=self.source_validator
+        )
+        
+        self.analogy_generator = AnalogyGenerator(
+            openai_api_key=self.openai_api_key,
+            groq_api_key=self.groq_api_key,
+            source_validator=self.source_validator,
+            firecrawl_client=self.firecrawl_client
+        )
         
         # Initialize readiness score thresholds
         self.readiness_thresholds = {
             "min_citations": 3,
             "min_images": 1,
             "min_headings": 3,
-            "min_paragraphs": 5
+            "min_paragraphs": 5,
+            "min_challenges": 10,
+            "min_pro_arguments": 5,
+            "min_counter_arguments": 5,
+            "min_visual_assets": 50,
+            "min_analogies": 3
+        }
+        
+        # Define letter grade thresholds
+        self.grade_thresholds = {
+            "A": 90,
+            "B": 80,
+            "C": 70,
+            "D": 60,
+            "F": 0
         }
     
     def process_markdown_file(self, file_path: str) -> Dict[str, Any]:
@@ -251,7 +332,7 @@ class ResearcherAgent:
             logger.error(f"Error in citation search: {e}")
             raise CitationError(f"Failed to get citations: {e}")
     
-    def gather_research(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    async def gather_research(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
         Gather research data for a topic.
         
@@ -261,70 +342,130 @@ class ResearcherAgent:
         Returns:
             Research data including citations and analysis
         """
+        main_topic = metadata.get('main_topic', 'Unknown Topic')
+        logger.info(f"Gathering comprehensive research for topic: {main_topic}")
+        
         research_data = {
             'citations': [],
             'system_affected': {},
-            'current_paradigm': {},
-            'proposed_solution': {},
-            'audience_analysis': {}
+            'challenges': [],
+            'solution': {},
+            'paradigms': {},
+            'audience': {},
+            'analogies': []
         }
         
-        # Generate search queries based on metadata
-        queries = []
-        main_topic = metadata.get('main_topic')
-        
-        if main_topic:
-            queries.append(main_topic)
-            queries.append(f"{main_topic} solution")
-            queries.append(f"{main_topic} industry")
-            queries.append(f"{main_topic} current state")
-        
-        # If no main topic, use headings
-        if not queries and metadata.get('headings'):
-            for heading in metadata.get('headings')[:2]:
-                queries.append(heading)
-        
-        # Gather citations for each query
-        for query in queries:
-            try:
-                citations = self.search_citations(query)
-                research_data['citations'].extend(citations)
-            except CitationError as e:
-                logger.warning(f"Citation error for query '{query}': {e}")
-        
-        # Basic analysis for each category
-        if main_topic:
-            # System affected analysis
-            research_data['system_affected'] = {
-                'name': main_topic,
-                'description': f"System or industry affected by {main_topic}",
-                'scale': 'Unknown'
-            }
+        # Gather initial citations
+        try:
+            # Generate search queries based on metadata
+            queries = []
+            if main_topic:
+                queries.append(main_topic)
+                queries.append(f"{main_topic} industry")
+                queries.append(f"{main_topic} solution")
+                queries.append(f"{main_topic} history")
             
-            # Current paradigm
-            research_data['current_paradigm'] = {
-                'name': f"Current approach to {main_topic}",
-                'limitations': [
-                    "Limitation 1 (placeholder)",
-                    "Limitation 2 (placeholder)"
-                ]
-            }
+            # If no main topic, use headings
+            if not queries and metadata.get('headings'):
+                for heading in metadata.get('headings')[:2]:
+                    queries.append(heading)
             
-            # Proposed solution
-            research_data['proposed_solution'] = {
-                'name': f"New approach to {main_topic}",
-                'advantages': [
-                    "Advantage 1 (placeholder)",
-                    "Advantage 2 (placeholder)"
-                ]
-            }
+            # Gather citations for each query
+            for query in queries:
+                try:
+                    citations = self.search_citations(query)
+                    research_data['citations'].extend(citations)
+                except CitationError as e:
+                    logger.warning(f"Citation error for query '{query}': {e}")
+        except Exception as e:
+            logger.error(f"Error gathering initial citations: {e}")
+        
+        # Run all research components in parallel
+        try:
+            # Create tasks for all research components
+            industry_task = asyncio.create_task(
+                self.industry_analyzer.analyze_industry(main_topic)
+            )
             
-            # Audience analysis
-            research_data['audience_analysis'] = {
-                'knowledge_level': 'moderate',
-                'interests': ["Technology", "Innovation"],
-                'background': f"Readers interested in {main_topic}"
-            }
+            solution_task = asyncio.create_task(
+                self.solution_analyzer.analyze_solution(
+                    main_topic,
+                    f"Innovative approach to {main_topic}",
+                    []  # Will be populated with challenges once industry analysis is done
+                )
+            )
+            
+            paradigm_task = asyncio.create_task(
+                self.paradigm_analyzer.analyze_paradigms(main_topic)
+            )
+            
+            audience_task = asyncio.create_task(
+                self.audience_analyzer.analyze_audience(main_topic)
+            )
+            
+            analogy_task = asyncio.create_task(
+                self.analogy_generator.generate_analogies(main_topic)
+            )
+            
+            # Wait for industry analysis to complete first
+            industry_result = await industry_task
+            
+            # Update challenges for solution analysis with results from industry analysis
+            if 'challenges' in industry_result:
+                # Cancel the existing solution task
+                solution_task.cancel()
+                
+                # Create a new solution task with the challenges
+                solution_task = asyncio.create_task(
+                    self.solution_analyzer.analyze_solution(
+                        main_topic,
+                        f"Innovative approach to {main_topic}",
+                        industry_result.get('challenges', [])
+                    )
+                )
+            
+            # Wait for all tasks to complete
+            solution_result = await solution_task
+            paradigm_result = await paradigm_task
+            audience_result = await audience_task
+            analogy_result = await analogy_task
+            
+            # Update research data with results
+            research_data['system_affected'] = industry_result
+            research_data['challenges'] = industry_result.get('challenges', [])
+            research_data['solution'] = solution_result
+            research_data['paradigms'] = paradigm_result
+            research_data['audience'] = audience_result
+            research_data['analogies'] = analogy_result
+            
+            # Add additional citations from research components
+            all_sources = []
+            for challenge in industry_result.get('challenges', []):
+                all_sources.extend(challenge.get('sources', []))
+                
+            for argument in solution_result.get('pro_arguments', []) + solution_result.get('counter_arguments', []):
+                all_sources.extend(argument.get('sources', []))
+                
+            for paradigm in paradigm_result.get('historical_paradigms', []):
+                all_sources.extend(paradigm.get('sources', []))
+                
+            for segment in audience_result.get('audience_segments', []):
+                all_sources.extend(segment.get('sources', []))
+            
+            # Convert sources to citation format and add to research data
+            for source in all_sources:
+                citation = {
+                    'title': source.get('title'),
+                    'url': source.get('url'),
+                    'description': source.get('description'),
+                    'source': source.get('source', 'Unknown Source'),
+                    'date': datetime.now(timezone.utc).isoformat()
+                }
+                if citation not in research_data['citations']:
+                    research_data['citations'].append(citation)
+            
+        except Exception as e:
+            logger.error(f"Error gathering research data: {e}")
         
         return research_data
     
@@ -353,26 +494,52 @@ class ResearcherAgent:
         # Add points for images
         image_count = metadata.get('images_count', 0)
         if image_count >= self.readiness_thresholds['min_images']:
-            score += 10
+            score += 5
         
         # Add points for headings
         heading_count = len(metadata.get('headings', []))
         if heading_count >= self.readiness_thresholds['min_headings']:
-            score += 10
+            score += 5
         
         # Add points for paragraphs
         paragraph_count = metadata.get('paragraphs_count', 0)
         if paragraph_count >= self.readiness_thresholds['min_paragraphs']:
-            score += 10
+            score += 5
         
         # Add points for additional content features
         if metadata.get('has_code_blocks'):
-            score += 5
+            score += 3
         
         if metadata.get('has_tables'):
-            score += 5
+            score += 3
         
         if metadata.get('has_lists'):
+            score += 3
+        
+        # Add points for research components
+        industry_challenges = research_data.get('challenges', [])
+        if len(industry_challenges) >= self.readiness_thresholds['min_challenges']:
+            score += 10
+        
+        solution_pro_args = research_data.get('solution', {}).get('pro_arguments', [])
+        if len(solution_pro_args) >= self.readiness_thresholds['min_pro_arguments']:
+            score += 5
+        
+        solution_counter_args = research_data.get('solution', {}).get('counter_arguments', [])
+        if len(solution_counter_args) >= self.readiness_thresholds['min_counter_arguments']:
+            score += 5
+        
+        # Count visual assets
+        visual_assets_count = 0
+        for analogy in research_data.get('analogies', {}).get('generated_analogies', []):
+            visual_assets_count += len(analogy.get('visual', {}).get('assets', []))
+        
+        if visual_assets_count >= self.readiness_thresholds['min_visual_assets']:
+            score += 10
+        
+        # Add points for analogies
+        analogy_count = len(research_data.get('analogies', {}).get('generated_analogies', []))
+        if analogy_count >= self.readiness_thresholds['min_analogies']:
             score += 5
         
         # Cap the score at 100
@@ -421,48 +588,108 @@ class ResearcherAgent:
 - **Has Lists:** {'Yes' if metadata.get('has_lists') else 'No'}
 
 ## Research Data
-
-### System/Industry Affected
-- **Name:** {research_data.get('system_affected', {}).get('name', 'Unknown')}
-- **Description:** {research_data.get('system_affected', {}).get('description', 'No description available')}
-- **Scale:** {research_data.get('system_affected', {}).get('scale', 'Unknown')}
-
-### Current Paradigm
-- **Name:** {research_data.get('current_paradigm', {}).get('name', 'Unknown')}
-- **Limitations:**
 """
         
-        # Add limitations
-        limitations = research_data.get('current_paradigm', {}).get('limitations', [])
-        for limitation in limitations:
-            report += f"  - {limitation}\n"
+        # Add industry/system challenges
+        report += """
+### Industry/System Challenges
+"""
+        challenges = research_data.get('challenges', [])
+        for i, challenge in enumerate(challenges[:5], 1):  # Show top 5 challenges
+            report += f"""
+#### {i}. {challenge.get('name', 'Unknown Challenge')}
+{challenge.get('description', 'No description available')}
+
+**Key components:**
+- Risk factors: {', '.join(challenge.get('components', {}).get('risk_factors', ['None identified'])[:3])}
+- Inefficiencies: {', '.join(challenge.get('components', {}).get('inefficiency_factors', ['None identified'])[:3])}
+"""
+        
+        if len(challenges) > 5:
+            report += f"\n*Plus {len(challenges) - 5} more challenges identified*\n"
+        
+        # Add solution analysis
+        report += """
+### Solution Analysis
+"""
+        pro_arguments = research_data.get('solution', {}).get('pro_arguments', [])
+        counter_arguments = research_data.get('solution', {}).get('counter_arguments', [])
         
         report += """
-### Proposed Solution
-- **Name:** {0}
-- **Advantages:**
-""".format(research_data.get('proposed_solution', {}).get('name', 'Unknown'))
+#### Supporting Arguments
+"""
+        for i, arg in enumerate(pro_arguments[:3], 1):  # Show top 3 pro arguments
+            report += f"""
+**{i}. {arg.get('name', 'Unknown Argument')}**
+{arg.get('description', 'No description available')}
+"""
         
-        # Add advantages
-        advantages = research_data.get('proposed_solution', {}).get('advantages', [])
-        for advantage in advantages:
-            report += f"  - {advantage}\n"
+        if len(pro_arguments) > 3:
+            report += f"\n*Plus {len(pro_arguments) - 3} more supporting arguments identified*\n"
         
+        report += """
+#### Counter Arguments
+"""
+        for i, arg in enumerate(counter_arguments[:3], 1):  # Show top 3 counter arguments
+            report += f"""
+**{i}. {arg.get('name', 'Unknown Argument')}**
+{arg.get('description', 'No description available')}
+"""
+        
+        if len(counter_arguments) > 3:
+            report += f"\n*Plus {len(counter_arguments) - 3} more counter arguments identified*\n"
+        
+        # Add paradigm analysis
+        report += """
+### Historical Paradigm Analysis
+"""
+        historical_paradigms = research_data.get('paradigms', {}).get('historical_paradigms', [])
+        future_paradigms = research_data.get('paradigms', {}).get('future_paradigms', [])
+        
+        for i, paradigm in enumerate(historical_paradigms[:3], 1):  # Show top 3 historical paradigms
+            report += f"""
+**{i}. {paradigm.get('name', 'Unknown Paradigm')} ({paradigm.get('time_period', 'Unknown period')})**
+{paradigm.get('description', 'No description available')}
+"""
+        
+        if historical_paradigms:
+            report += """
+#### Future Paradigm Possibilities
+"""
+            for i, paradigm in enumerate(future_paradigms[:2], 1):  # Show top 2 future paradigms
+                report += f"""
+**{i}. {paradigm.get('name', 'Unknown Paradigm')}**
+{paradigm.get('description', 'No description available')}
+Estimated timeline: {paradigm.get('estimated_timeline', 'Unknown')}
+"""
+        
+        # Add audience analysis
         report += """
 ### Audience Analysis
-- **Knowledge Level:** {0}
-- **Background:** {1}
-- **Interests:**
-""".format(
-            research_data.get('audience_analysis', {}).get('knowledge_level', 'Unknown'),
-            research_data.get('audience_analysis', {}).get('background', 'Unknown')
-        )
+"""
+        audience_segments = research_data.get('audience', {}).get('audience_segments', [])
         
-        # Add interests
-        interests = research_data.get('audience_analysis', {}).get('interests', [])
-        for interest in interests:
-            report += f"  - {interest}\n"
+        for i, segment in enumerate(audience_segments[:3], 1):  # Show top 3 audience segments
+            report += f"""
+**{i}. {segment.get('name', 'Unknown Segment')}**
+{segment.get('description', 'No description available')}
+- Knowledge level: {segment.get('knowledge_level', 'Unknown')}
+- Key pain points: {', '.join(segment.get('pain_points', ['None identified'])[:3])}
+"""
         
+        # Add analogies
+        report += """
+### Powerful Analogies
+"""
+        analogies = research_data.get('analogies', {}).get('generated_analogies', [])
+        
+        for i, analogy in enumerate(analogies[:3], 1):  # Show top 3 analogies
+            report += f"""
+**{i}. {analogy.get('title', 'Unknown Analogy')}** (from {analogy.get('domain', 'Unknown domain')})
+{analogy.get('description', 'No description available')}
+"""
+        
+        # Add citations
         report += """
 ## Citations
 
@@ -471,7 +698,7 @@ The following sources were found during research:
         
         # Add citations
         citations = research_data.get('citations', [])
-        for i, citation in enumerate(citations, 1):
+        for i, citation in enumerate(citations[:10], 1):  # Show top 10 citations
             report += f"""
 ### {i}. {citation.get('title', 'Unknown Title')}
 - **URL:** {citation.get('url', 'No URL')}
@@ -479,18 +706,22 @@ The following sources were found during research:
 - **Description:** {citation.get('description', 'No description available')}
 """
         
+        if len(citations) > 10:
+            report += f"\n*Plus {len(citations) - 10} more citations gathered*\n"
+        
+        # Add readiness assessment
         report += """
 ## Readiness Assessment
 
 """
         if readiness_score >= 80:
-            report += "This blog post shows **excellent readiness** for review. It has sufficient citations, structure, and content to proceed to the review stage."
+            report += "This blog post shows **excellent readiness** for review. It has sufficient citations, structure, and comprehensive research components to proceed to the review stage."
         elif readiness_score >= 60:
             report += "This blog post shows **good readiness** for review. Some improvements might enhance the overall quality, but it can proceed to the review stage."
         elif readiness_score >= 40:
-            report += "This blog post shows **moderate readiness** for review. Consider adding more citations, images, or sections before proceeding to the review stage."
+            report += "This blog post shows **moderate readiness** for review. Consider expanding the research components before proceeding to the review stage."
         else:
-            report += "This blog post shows **low readiness** for review. Significant improvements are recommended before proceeding to the review stage."
+            report += "This blog post shows **low readiness** for review. Significant improvements to content and research are recommended before proceeding to the review stage."
         
         return report
     
@@ -564,6 +795,23 @@ The following sources were found during research:
             )
             logger.info(f"Stored research report with ID: {report_id}")
             
+            # Store the research data
+            research_data_id = self.db_client.db.research_data.update_one(
+                {"blog_title": blog_title, "version": version},
+                {"$set": {
+                    "blog_title": blog_title,
+                    "version": version,
+                    "data": research_data,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }},
+                upsert=True
+            ).upserted_id
+            
+            if research_data_id:
+                logger.info(f"Stored research data with ID: {research_data_id}")
+            else:
+                logger.info(f"Updated existing research data for {blog_title} v{version}")
+            
             # Store the images
             image_ids = []
             for img_ref, img_data in blog_data.get('images', {}).items():
@@ -578,7 +826,27 @@ The following sources were found during research:
                 )
                 image_ids.append(image_id)
             
-            logger.info(f"Stored {len(image_ids)} images")
+            logger.info(f"Stored {len(image_ids)} blog images")
+            
+            # Store visual assets from analogies
+            visual_asset_ids = []
+            for analogy in research_data.get('analogies', {}).get('generated_analogies', []):
+                visual = analogy.get('visual', {})
+                assets = visual.get('assets', [])
+                
+                for asset in assets:
+                    asset_id = self.db_client.store_media(
+                        blog_title,
+                        version,
+                        asset.get('format', 'unknown'),
+                        "firecrawl",
+                        asset.get('url'),
+                        asset.get('base64'),
+                        f"Visual for {analogy.get('title', 'analogy')}"
+                    )
+                    visual_asset_ids.append(asset_id)
+            
+            logger.info(f"Stored {len(visual_asset_ids)} visual assets")
             
             # Create YAML tracker
             yaml_path = create_tracker_yaml(blog_title, version)
@@ -591,6 +859,7 @@ The following sources were found during research:
                 "readiness_score": readiness_score,
                 "report_id": report_id,
                 "image_ids": image_ids,
+                "visual_asset_ids": visual_asset_ids,
                 "yaml_path": yaml_path
             }
             
@@ -598,7 +867,7 @@ The following sources were found during research:
             logger.error(f"Error saving research results: {e}")
             raise
     
-    def process_blog(self, file_path: str) -> Dict[str, Any]:
+    async def process_blog(self, file_path: str) -> Dict[str, Any]:
         """
         Process a blog from a file path.
         
@@ -623,7 +892,7 @@ The following sources were found during research:
             metadata['version'] = blog_data.get('version')
             
             # Gather research data
-            research_data = self.gather_research(metadata)
+            research_data = await self.gather_research(metadata)
             
             # Calculate readiness score
             readiness_score = self.calculate_readiness_score(metadata, research_data)
@@ -651,6 +920,9 @@ def main():
     parser.add_argument('file_path', help='Path to markdown file or ZIP file containing blog content')
     parser.add_argument('--mongodb-uri', help='MongoDB connection URI')
     parser.add_argument('--brave-api-key', help='Brave Search API key')
+    parser.add_argument('--openai-api-key', help='OpenAI API key')
+    parser.add_argument('--groq-api-key', help='Groq API key')
+    parser.add_argument('--firecrawl-server', help='Firecrawl MCP server URL')
     parser.add_argument('--opik-server', help='Opik MCP server URL')
     
     args = parser.parse_args()
@@ -660,11 +932,14 @@ def main():
         agent = ResearcherAgent(
             mongodb_uri=args.mongodb_uri,
             brave_api_key=args.brave_api_key,
+            openai_api_key=args.openai_api_key,
+            groq_api_key=args.groq_api_key,
+            firecrawl_server=args.firecrawl_server,
             opik_server=args.opik_server
         )
         
         # Process the blog
-        result = agent.process_blog(args.file_path)
+        result = asyncio.run(agent.process_blog(args.file_path))
         
         # Output result
         print(json.dumps(result, indent=2))

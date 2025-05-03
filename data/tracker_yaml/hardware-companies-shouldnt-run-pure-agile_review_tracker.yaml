@@ -1,0 +1,22 @@
+blog_title: hardware-companies-shouldnt-run-pure-agile
+current_version: 1
+review_pipeline:
+  factual_review:
+    complete: true
+    completed_by: reviewer_agent
+    result_file: hardware-companies-shouldnt-run-pure-agile_factual_review_v1.md
+    timestamp: '2025-05-03T03:18:00.290229+00:00'
+  style_review:
+    complete: false
+    completed_by: null
+    result_file: null
+    timestamp: null
+  grammar_review:
+    complete: false
+    completed_by: null
+    result_file: null
+    timestamp: null
+final_release:
+  complete: false
+  released_by: null
+  timestamp: null

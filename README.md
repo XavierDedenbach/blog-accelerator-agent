@@ -1,6 +1,81 @@
 # Blog Accelerator Agent
 
-A Python application that accelerates blog content development through automated research and review processes.
+An AI-powered tool for accelerating research and review of blog content.
+
+## Project Overview
+
+The Blog Accelerator Agent automates deep research and multi-layered review processes while preserving human authorship for ideation and writing. The agent operates in two primary modes:
+
+1. **Research Mode**: Performs exhaustive topic research including industry analysis, solution evaluation, paradigm assessment, and visual asset collection.
+2. **Review Mode**: Conducts a three-stage review process (factual, style, and grammar) with user approval gates.
+
+## Recent Enhancements
+
+We've recently implemented significant enhancements to the research capabilities:
+
+### Completed Components:
+
+- ✅ Source validation system with domain credibility scoring and blacklist management
+- ✅ Firecrawl MCP integration for comprehensive visual asset collection (50-100 assets)
+- ✅ Enhanced MongoDB schema for complex research data storage
+- ✅ Industry analysis module with 10+ critical challenges identification
+- ✅ Solution analysis with pro/counter arguments and metrics tracking
+- ✅ Paradigm analysis module for historical context assessment
+- ✅ Audience analysis module for knowledge gap identification
+- ✅ Analogy generator for simplified explanations
+- ✅ Comprehensive test coverage for new components
+- ✅ Setup script for configuring the research environment
+- ✅ Complete researcher_agent.py update to utilize all modular components
+
+### Next Development Steps:
+
+- 🔄 Integration with front-end UI for research results visualization
+- 🔄 Enhance analytics dashboard for research quality metrics
+- 🔄 Implement automated follow-up research for specific topics
+- 🔄 Connect with external data sources for real-time industry updates
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.8+
+- MongoDB
+- OpenAI API key or Groq API key
+- Brave Search API key (Premium tier)
+
+### Installation
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/blog-accelerator-agent.git
+   cd blog-accelerator-agent
+   ```
+
+2. Set up the research environment:
+   ```
+   python setup_research.py
+   ```
+
+3. Install dependencies:
+   ```
+   python setup_research.py --install-deps
+   ```
+
+4. Configure your API keys in the `.env` file.
+
+## Usage
+
+### Research Mode
+
+```bash
+python agents/researcher_agent.py path/to/your/blog_post.md --brave-api-key YOUR_BRAVE_KEY --openai-api-key YOUR_OPENAI_KEY
+```
+
+### Review Mode
+
+```bash
+python agents/reviewer_agent.py --stage factual --yaml blog_title_review_tracker.yaml
+```
 
 ## Project Structure
 
@@ -12,29 +87,58 @@ blog-accelerator-agent/
 │   ├── test_file_ops.py
 │   ├── test_researcher_agent.py
 │   ├── test_reviewer_agent.py
+│   ├── test_source_validator.py
+│   ├── test_firecrawl_client.py
+│   ├── test_industry_analysis.py
+│   ├── test_solution_analysis.py
+│   ├── test_paradigm_analysis.py
+│   ├── test_audience_analysis.py
+│   ├── test_analogy_generator.py
 │   └── conftest.py
 ├── agents/
+│   ├── research/
+│   │   ├── industry_analysis.py
+│   │   ├── solution_analysis.py
+│   │   ├── paradigm_analysis.py
+│   │   ├── audience_analysis.py
+│   │   ├── analogy_generator.py
+│   │   └── __init__.py
+│   ├── utilities/
+│   │   ├── db.py
+│   │   ├── file_ops.py
+│   │   ├── source_validator.py
+│   │   ├── firecrawl_client.py
+│   │   └── yaml_guard.py
 │   ├── researcher_agent.py
-│   ├── reviewer_agent.py
-│   └── utilities/
-│       ├── db.py
-│       ├── file_ops.py
-│       └── yaml_guard.py
+│   └── reviewer_agent.py
 ├── api/
 │   ├── main.py
 │   └── endpoints/
 │       ├── process.py
 │       └── review.py
 ├── data/
+│   ├── analogies/
+│   ├── blacklist/
+│   ├── firecrawl_cache/
+│   ├── research_components/
+│   ├── tracker_yaml/
 │   ├── uploads/
-│   └── tracker_yaml/
+│   └── visual_assets/
 ├── storage/
 ├── docker-compose.yml
+├── setup_research.py
 ├── .env
 └── README.md
 ```
 
 ## Development Status
+
+### Dev - 2024-08-15
+- ✅ Implemented paradigm analysis module in `agents/research/paradigm_analysis.py`
+- ✅ Implemented audience analysis module in `agents/research/audience_analysis.py`
+- ✅ Implemented analogy generator in `agents/research/analogy_generator.py`
+- ✅ Updated researcher_agent.py to use all modular components
+- ✅ Created tests for new research components
 
 ### Dev - 2024-08-12
 - ✅ Implemented API endpoints in `api/main.py`, `api/endpoints/process.py`, and `api/endpoints/review.py`
@@ -86,62 +190,35 @@ FIRECRAWL_SERVER=http://localhost:4000
 OPIK_SERVER=http://localhost:7000
 ```
 
-# blog-accelerator-agent
+# Research Component Details
 
-AI-assisted research and review tooling for thoughtful, human-written blog posts. This agent supports content creators by streamlining deep research and factual/style/grammar review, without generating the writing itself.
+## Industry Analysis
+- Identifies 10+ critical challenges in the industry/system
+- Analyzes risk factors, inefficiencies, costs, and bottlenecks
+- Validates findings with authoritative sources
 
----
+## Solution Analysis
+- Generates 5-10 supporting arguments with evidence
+- Generates 5-10 counter arguments with evidence
+- Identifies key metrics for measuring progress
 
-## 🧠 What It Does
+## Paradigm Analysis
+- Maps historical paradigms related to the topic
+- Analyzes transitions between paradigms
+- Extracts lessons from historical examples
+- Projects future paradigm possibilities
 
-* **Research Mode**: Breaks down opinionated topics, gathers structured analysis, and outputs rich markdown reports.
-* **Review Mode**: Performs fact-checking, stylistic review by multiple AI personas, and grammar refinement before publication.
+## Audience Analysis
+- Identifies distinct audience segments
+- Analyzes needs, pain points, and motivations
+- Evaluates existing knowledge and expertise levels
+- Recommends content strategies based on audience characteristics
 
-> ⚠️ No AI-written blog content. This tool is for augmentation, not automation.
-
----
-
-## 🚀 Getting Started
-
-1. Clone the repo
-2. Create a `.env` file based on `.env.example`
-3. Run the system with:
-
-```bash
-docker-compose up --build
-```
-
-4. Access services:
-
-   * API: `http://localhost:8080`
-   * Opik MCP: `http://localhost:7000`
-   * Firecrawl MCP: `http://localhost:4000`
-   * MongoDB: `mongodb://localhost:27017`
-
----
-
-## 📄 Documentation
-
-For full architecture, workflows, APIs, and feature breakdown, see the [Product Requirements Document (PRD)](./docs/PRD.md)
-
----
-
-## ✅ Tasks in Progress
-
-* [ ] Notion webhook for topic intake
-* [ ] Structured analogy generation
-* [ ] Reviewer personas: Packy, Tufte, Naval, etc.
-* [ ] Consensus scoring in fact-check tables
-* [ ] Image & infographic auto-fetching via Firecrawl MCP
-
----
-
-## 🧪 Development Tips
-
-* FastAPI backend runs inside Docker (`blog-agent`)
-* Use Opik MCP to inspect agent thought chains and trace logs
-* Store all content (text + images) directly in MongoDB
-* Logs are saved under `./logs/`
+## Analogy Generator
+- Creates powerful analogies to explain complex concepts
+- Evaluates and refines analogies for accuracy and clarity
+- Provides visual representations for each analogy
+- Searches for existing analogies in literature
 
 ---
 
@@ -153,10 +230,14 @@ Basic smoke tests can be run by:
 docker exec -it blog-accelerator pytest
 ```
 
-> For full E2E flow testing, mock blog uploads to `./review/` and trigger pipeline endpoints.
+To run tests for specific components:
+
+```bash
+pytest tests/test_analogy_generator.py
+```
 
 ---
 
 ## 📬 Contact
 
-Built with ❤️ by [Xavier Dedenbach](https://github.com/xdede)
+Built with ❤️ by Blog Accelerator Agent Team
