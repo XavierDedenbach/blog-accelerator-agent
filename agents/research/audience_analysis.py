@@ -55,12 +55,52 @@ class AudienceAnalyzer:
     - Recommendation of content strategies
     """
     
+    # Default target audience segments for the Blog Accelerator Agent
+    DEFAULT_AUDIENCE_SEGMENTS = [
+        {
+            "name": "STEM Students",
+            "description": "College students in later years of STEM programs, seeking practical applications of their theoretical knowledge.",
+            "motivations": ["Connecting theory to real-world applications", "Exploring career paths", "Staying current with industry trends"],
+            "pain_points": ["Too much theory, not enough practice", "Difficulty seeing real-world relevance", "Information overload"],
+            "knowledge_level": "intermediate"
+        },
+        {
+            "name": "Technical Professionals",
+            "description": "Working professionals across various technical disciplines, looking to stay current with innovations and trends.",
+            "motivations": ["Continuous learning", "Career advancement", "Problem-solving improvements"],
+            "pain_points": ["Limited time for research", "Rapid technological change", "Difficulty evaluating competing solutions"],
+            "knowledge_level": "advanced"
+        },
+        {
+            "name": "Engineers",
+            "description": "Engineering practitioners who need to understand both technical details and systemic impacts of new technologies.",
+            "motivations": ["Finding efficient solutions", "Technical depth", "Cross-disciplinary applications"],
+            "pain_points": ["Balancing depth vs. breadth", "Connecting specialized knowledge to broader context", "Evaluating trade-offs"],
+            "knowledge_level": "advanced"
+        },
+        {
+            "name": "Founders",
+            "description": "Startup founders and entrepreneurs looking for insights on technological trends to inform business decisions.",
+            "motivations": ["Identifying opportunities", "Understanding competitive landscape", "Risk assessment"],
+            "pain_points": ["Information asymmetry", "Technical due diligence challenges", "Resource constraints"],
+            "knowledge_level": "intermediate"
+        },
+        {
+            "name": "Business Professionals",
+            "description": "Business leaders and managers who need to understand technical topics for strategic decision-making.",
+            "motivations": ["Strategic planning", "Investment decisions", "Cross-functional communication"],
+            "pain_points": ["Technical knowledge gaps", "Translating technical concepts to business impact", "Keeping pace with innovation"],
+            "knowledge_level": "beginner"
+        }
+    ]
+    
     def __init__(
         self,
         openai_api_key: Optional[str] = None,
         groq_api_key: Optional[str] = None,
         source_validator: Optional[SourceValidator] = None,
-        min_segments: int = 3
+        min_segments: int = 3,
+        use_default_segments: bool = False
     ):
         """
         Initialize the audience analyzer.
@@ -70,6 +110,7 @@ class AudienceAnalyzer:
             groq_api_key: Groq API key
             source_validator: SourceValidator instance
             min_segments: Minimum number of audience segments to identify
+            use_default_segments: Whether to use default audience segments
         """
         self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
         self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY")
@@ -95,6 +136,9 @@ class AudienceAnalyzer:
         
         # Set minimum segments threshold
         self.min_segments = min_segments
+        
+        # Set whether to use default segments
+        self.use_default_segments = use_default_segments
         
         # Load prompts
         self._init_prompts()
@@ -130,6 +174,8 @@ Format your response as a JSON array of segment objects with these fields:
 - search_terms: Array of search terms to find data about this segment
 
 Only respond with the JSON array. Include at least {min_segments} distinct audience segments.
+
+Important: Consider how this topic might specifically appeal to: STEM students in college, technical professionals, engineers, founders, and business people.
 """
         )
         
@@ -221,6 +267,19 @@ Only respond with the JSON object.
         Returns:
             List of audience segment dictionaries
         """
+        # If using default segments, return them with search terms for the topic
+        if self.use_default_segments:
+            segments = self.DEFAULT_AUDIENCE_SEGMENTS.copy()
+            # Add search terms for each segment based on the topic
+            for segment in segments:
+                segment["search_terms"] = [
+                    f"{segment['name']} {topic}",
+                    f"{topic} for {segment['name']}",
+                    f"{segment['name']} needs {topic}"
+                ]
+            logger.info(f"Using default audience segments for topic: {topic}")
+            return segments
+            
         try:
             # Create chain for segment identification
             chain = LLMChain(

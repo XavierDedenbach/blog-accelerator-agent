@@ -11,6 +11,14 @@ This application assists writers in two distinct phases:
 * **Research Mode:** Performs exhaustive topic breakdown (industry, solution, paradigm, audience), gathers extensive data with visual assets, evaluates solutions, and produces comprehensive research documentation.
 * **Review Mode:** Conducts three-stage review process (factual verification with multiple sources, multi-persona style review, grammar correction) with user approval gates between stages.
 
+**Target Audience:**
+The Blog Accelerator Agent is designed for:
+* STEM majors in later years of college
+* Technical professionals of any age
+* Engineers across all disciplines
+* Founders and entrepreneurs
+* Business professionals who need to understand technical topics
+
 **Deployment Target:**
 
 * Docker container
