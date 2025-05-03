@@ -1,0 +1,49 @@
+version: '3.9'
+
+services:
+  blog-agent:
+    build: .
+    container_name: blog-accelerator
+    restart: always
+    ports:
+      - "8080:8080"  # FastAPI port
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - MONGODB_URI=mongodb://mongo:27017
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - OPIK_SERVER=http://opik:7000
+      - FIRECRAWL_SERVER=http://firecrawl:4000
+    depends_on:
+      - mongo
+      - opik
+      - firecrawl
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  opik:
+    image: opik/opik-mcp:latest
+    container_name: opik
+    restart: unless-stopped
+    ports:
+      - "7000:7000"
+
+  firecrawl:
+    image: firecrawl/firecrawl-mcp:latest
+    container_name: firecrawl
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+
+volumes:
+  mongo_data:
