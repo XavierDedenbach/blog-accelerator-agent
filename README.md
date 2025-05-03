@@ -36,10 +36,15 @@ blog-accelerator-agent/
 
 ## Development Status
 
+### Dev - 2024-08-12
+- ✅ Implemented API endpoints in `api/main.py`, `api/endpoints/process.py`, and `api/endpoints/review.py`
+- ✅ Created FastAPI endpoints for blog upload and review processes
+- 🔜 Working on deploying the full system with Docker
+
 ### Dev - 2024-08-11
 - ✅ Implemented reviewer agent in `reviewer_agent.py`
 - ✅ Created tests for reviewer agent operations
-- 🔜 Working on API endpoints next
+- ✅ Working on API endpoints next
 
 ### Dev - 2024-08-10
 - ✅ Implemented file operations in `file_ops.py`
@@ -59,6 +64,14 @@ blog-accelerator-agent/
 ```bash
 pytest tests/
 ```
+
+## Running the API
+
+```bash
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8080
+```
+
+Visit http://localhost:8080/docs for the OpenAPI documentation.
 
 ## Environment Variables
 
