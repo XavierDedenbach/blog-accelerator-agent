@@ -1,3 +1,65 @@
+# Blog Accelerator Agent
+
+A Python application that accelerates blog content development through automated research and review processes.
+
+## Project Structure
+
+```
+blog-accelerator-agent/
+├── tests/
+│   ├── test_db.py
+│   ├── test_yaml_guard.py
+│   ├── test_file_ops.py
+│   ├── test_researcher_agent.py
+│   ├── test_reviewer_agent.py
+│   └── conftest.py
+├── agents/
+│   ├── researcher_agent.py
+│   ├── reviewer_agent.py
+│   └── utilities/
+│       ├── db.py
+│       ├── file_ops.py
+│       └── yaml_guard.py
+├── api/
+│   ├── main.py
+│   └── endpoints/
+│       ├── process.py
+│       └── review.py
+├── data/
+│   ├── uploads/
+│   └── tracker_yaml/
+├── storage/
+├── docker-compose.yml
+├── .env
+└── README.md
+```
+
+## Development Status
+
+### Dev - 2024-08-08
+- ✅ Implemented MongoDB utilities in `db.py`
+- ✅ Created tests for MongoDB operations
+- 🔜 Working on YAML validation guard next
+
+## Running Tests
+
+```bash
+pytest tests/
+```
+
+## Environment Variables
+
+Create a `.env` file in the root directory with the following variables:
+
+```
+MONGODB_URI=mongodb://localhost:27017
+OPENAI_API_KEY=your_openai_key
+GROQ_API_KEY=your_groq_key
+BRAVE_API_KEY=your_brave_key
+FIRECRAWL_SERVER=http://localhost:4000
+OPIK_SERVER=http://localhost:7000
+```
+
 # blog-accelerator-agent
 
 AI-assisted research and review tooling for thoughtful, human-written blog posts. This agent supports content creators by streamlining deep research and factual/style/grammar review, without generating the writing itself.
