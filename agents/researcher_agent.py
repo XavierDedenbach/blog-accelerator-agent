@@ -159,7 +159,55 @@ class ResearcherAgent:
             'analogies_max': 4,
             'analogies_points': 5,
             
-            'sequential_evidence_points': 5
+            'sequential_evidence_points': 5,
+            
+            'paradigms_target': 3,
+            'paradigms_points': 10,
+            
+            'audience_segments_min': 1,
+            'audience_segments_target': 3,
+            'audience_segments_max': 5,
+            'audience_segments_points': 10,
+            
+            'solution_visuals_min': 10,
+            'solution_visuals_target': 50,  # PRD specifies 50-100 solution visuals
+            'solution_visuals_max': 100,
+            'solution_visuals_points': 10,
+            
+            'paradigm_visuals_min': 3,
+            'paradigm_visuals_target': 10,  # PRD specifies 10-20 paradigm visuals
+            'paradigm_visuals_max': 20,
+            'paradigm_visuals_points': 5,
+            
+            'challenge_analogies_min': 1,
+            'challenge_analogies_target': 3,  # PRD specifies 3 challenge analogies
+            'challenge_analogies_max': 5,
+            'challenge_analogies_points': 5,
+            
+            'solution_analogies_min': 1,
+            'solution_analogies_target': 3,  # PRD specifies 3 solution analogies
+            'solution_analogies_max': 5,
+            'solution_analogies_points': 5,
+            
+            'citations_min': 3,
+            'citations_target': 15,
+            'citations_max': 30,
+            'citations_points': 10,
+            
+            'sequential_evidence_min': 1,
+            'sequential_evidence_points': 10,
+            
+            'paragraphs_min': 5,
+            'paragraphs_max': 15,
+            'paragraphs_points': 2,
+            
+            'headings_min': 3,
+            'headings_max': 8,
+            'headings_points': 2,
+            
+            'images_min': 1,
+            'images_max': 5,
+            'images_points': 1
         }
         
         # Initialize letter grade thresholds
@@ -833,259 +881,750 @@ class ResearcherAgent:
         
         return research_data
     
-    def calculate_readiness_score(self, metadata: Dict[str, Any], research_data: Dict[str, Any]) -> float:
+    def calculate_readiness_score(self, metadata: Dict[str, Any], research_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Calculate a readiness score for the blog based on metadata and research.
+        Calculate a readiness score for the blog based on metadata and research data,
+        returning a letter grade (A-F) with detailed breakdown and improvement recommendations.
+        
+        Enhanced grading criteria:
+        - Grade C or below (≤ 70%) for content with any critical missing components
+        - Grade B (71-85%) for content with minimum 30% in EACH category
+        - Grade A (86-100%) requiring rich visual assets, strong systemic thinking, proper citations,
+          nuanced solution research, and clear articulation of audience benefits
         
         Args:
             metadata: Blog metadata
             research_data: Research data
             
         Returns:
-            Readiness score from 0-100
+            Dictionary containing the numerical score, letter grade, components breakdown,
+            automatic grade caps explanation, and improvement recommendations
         """
         # Initialize score components dictionary for detailed reporting
         score_components = {}
         
-        # Base score - start at exactly 50 points for minimal content
-        base_score = 50.0
+        # Start with lower base score (reduced from 50 to 30)
+        base_score = 30.0
         score_components['base_score'] = base_score
         
         # Initialize total score with base score
         total_score = base_score
         
-        # Define readiness thresholds if not set
-        if not hasattr(self, 'readiness_thresholds'):
-            self.readiness_thresholds = {
-                'citations_min': 3,
-                'citations_max': 10,
-                'citations_points': 10,
-                
-                'images_min': 1,
-                'images_max': 5,
-                'images_points': 5,
-                
-                'headings_min': 3,
-                'headings_max': 8,
-                'headings_points': 5,
-                
-                'paragraphs_min': 5,
-                'paragraphs_max': 15,
-                'paragraphs_points': 5,
-                
-                'challenges_min': 2,
-                'challenges_max': 5,
-                'challenges_points': 5,
-                
-                'pro_arguments_min': 2,
-                'pro_arguments_max': 5,
-                'pro_arguments_points': 5,
-                
-                'counter_arguments_min': 1,
-                'counter_arguments_max': 3,
-                'counter_arguments_points': 5,
-                
-                'visual_assets_min': 1,
-                'visual_assets_max': 5,
-                'visual_assets_points': 5,
-                
-                'analogies_min': 1,
-                'analogies_max': 4,
-                'analogies_points': 5,
-                
-                'sequential_evidence_points': 5
-            }
+        # Initialize dictionaries to track component percentages and missing essentials
+        component_percentages = {}
+        missing_critical_components = []
+        improvement_recommendations = []
         
-        # 1. Citation score
-        citation_count = len(research_data.get('citations', []))
-        if citation_count >= self.readiness_thresholds['citations_min']:
-            citation_score = min(
-                self.readiness_thresholds['citations_points'],
-                (citation_count / self.readiness_thresholds['citations_max']) * self.readiness_thresholds['citations_points']
-            )
-            if citation_count >= self.readiness_thresholds['citations_max']:
-                citation_score = self.readiness_thresholds['citations_points']
-        else:
-            citation_score = 0
-            
-        score_components['citation_score'] = citation_score
-        total_score += citation_score
-        
-        # 2. Image score (from metadata)
-        image_count = metadata.get('images_count', 0)
-        if image_count >= self.readiness_thresholds['images_min']:
-            image_score = min(
-                self.readiness_thresholds['images_points'],
-                (image_count / self.readiness_thresholds['images_max']) * self.readiness_thresholds['images_points']
-            )
-            if image_count >= self.readiness_thresholds['images_max']:
-                image_score = self.readiness_thresholds['images_points']
-        else:
-            image_score = 0
-            
-        score_components['image_score'] = image_score
-        total_score += image_score
-        
-        # 3. Headings score
-        headings_count = len(metadata.get('headings', []))
-        if headings_count >= self.readiness_thresholds['headings_min']:
-            headings_score = min(
-                self.readiness_thresholds['headings_points'],
-                (headings_count / self.readiness_thresholds['headings_max']) * self.readiness_thresholds['headings_points']
-            )
-            if headings_count >= self.readiness_thresholds['headings_max']:
-                headings_score = self.readiness_thresholds['headings_points']
-        else:
-            headings_score = 0
-            
-        score_components['headings_score'] = headings_score
-        total_score += headings_score
-        
-        # 4. Paragraphs score
-        paragraphs_count = metadata.get('paragraphs_count', 0)
-        if paragraphs_count >= self.readiness_thresholds['paragraphs_min']:
-            paragraphs_score = min(
-                self.readiness_thresholds['paragraphs_points'],
-                (paragraphs_count / self.readiness_thresholds['paragraphs_max']) * self.readiness_thresholds['paragraphs_points']
-            )
-            if paragraphs_count >= self.readiness_thresholds['paragraphs_max']:
-                paragraphs_score = self.readiness_thresholds['paragraphs_points']
-        else:
-            paragraphs_score = 0
-            
-        score_components['paragraphs_score'] = paragraphs_score
-        total_score += paragraphs_score
-        
-        # 5. Challenges score
+        # 1. Industry Challenge Analysis Score
         challenges_count = len(research_data.get('challenges', []))
-        if challenges_count >= self.readiness_thresholds['challenges_min']:
-            challenges_score = min(
-                self.readiness_thresholds['challenges_points'],
-                (challenges_count / self.readiness_thresholds['challenges_max']) * self.readiness_thresholds['challenges_points']
-            )
-            if challenges_count >= self.readiness_thresholds['challenges_max']:
-                challenges_score = self.readiness_thresholds['challenges_points']
+        challenges_target = self.readiness_thresholds.get('challenges_target', 10)
+        challenges_min = self.readiness_thresholds.get('challenges_min', 2)
+        challenges_max = self.readiness_thresholds.get('challenges_max', 15)
+        challenges_points = self.readiness_thresholds.get('challenges_points', 15)
+        
+        if challenges_count >= challenges_min:
+            # Base score for meeting minimum requirements
+            min_percentage = challenges_min / challenges_target
+            challenges_score = min_percentage * challenges_points
+            
+            # Additional score for exceeding minimum up to target
+            if challenges_count > challenges_min:
+                additional_challenges = min(challenges_count, challenges_target) - challenges_min
+                additional_range = challenges_target - challenges_min
+                if additional_range > 0:
+                    additional_percentage = additional_challenges / additional_range
+                    remaining_points = challenges_points * (1 - min_percentage)
+                    challenges_score += additional_percentage * remaining_points
+            
+            # Bonus for exceeding target up to max
+            if challenges_count > challenges_target:
+                bonus_factor = min(1.0, (challenges_count - challenges_target) /
+                                  (challenges_max - challenges_target))
+                challenges_score *= (1.0 + bonus_factor * 0.2)  # Up to 20% bonus
+            
+            # Cap at maximum points
+            challenges_score = min(challenges_score, challenges_points * 1.2)
+            
+            # Calculate percentage of maximum possible points
+            challenges_percentage = challenges_score / (challenges_points * 1.2) * 100
+            component_percentages['challenges'] = challenges_percentage
         else:
             challenges_score = 0
-            
+            component_percentages['challenges'] = 0
+            missing_critical_components.append("Industry Challenges")
+            improvement_recommendations.append("Identify at least 2 industry challenges, aiming for 10+ for full points")
+        
         score_components['challenges_score'] = challenges_score
         total_score += challenges_score
         
-        # 6. Pro arguments score
+        # 2. Solution Arguments Score (Pro Arguments)
         pro_arguments_count = len(research_data.get('solution', {}).get('pro_arguments', []))
-        if pro_arguments_count >= self.readiness_thresholds['pro_arguments_min']:
-            pro_score = min(
-                self.readiness_thresholds['pro_arguments_points'],
-                (pro_arguments_count / self.readiness_thresholds['pro_arguments_max']) * self.readiness_thresholds['pro_arguments_points']
-            )
-            if pro_arguments_count >= self.readiness_thresholds['pro_arguments_max']:
-                pro_score = self.readiness_thresholds['pro_arguments_points']
+        pro_arguments_target = self.readiness_thresholds.get('pro_arguments_target', 5)
+        pro_arguments_min = self.readiness_thresholds.get('pro_arguments_min', 2)
+        pro_arguments_max = self.readiness_thresholds.get('pro_arguments_max', 10)
+        pro_arguments_points = self.readiness_thresholds.get('pro_arguments_points', 10)
+        
+        if pro_arguments_count >= pro_arguments_min:
+            # Base score for meeting minimum requirements
+            min_percentage = pro_arguments_min / pro_arguments_target
+            pro_score = min_percentage * pro_arguments_points
+            
+            # Additional score for exceeding minimum up to target
+            if pro_arguments_count > pro_arguments_min:
+                additional_args = min(pro_arguments_count, pro_arguments_target) - pro_arguments_min
+                additional_range = pro_arguments_target - pro_arguments_min
+                if additional_range > 0:
+                    additional_percentage = additional_args / additional_range
+                    remaining_points = pro_arguments_points * (1 - min_percentage)
+                    pro_score += additional_percentage * remaining_points
+            
+            # Bonus for exceeding target up to max
+            if pro_arguments_count > pro_arguments_target:
+                bonus_factor = min(1.0, (pro_arguments_count - pro_arguments_target) /
+                                 (pro_arguments_max - pro_arguments_target))
+                pro_score *= (1.0 + bonus_factor * 0.2)  # Up to 20% bonus
+            
+            # Cap at maximum points
+            pro_score = min(pro_score, pro_arguments_points * 1.2)
+            
+            # Calculate percentage of maximum possible points
+            pro_arguments_percentage = pro_score / (pro_arguments_points * 1.2) * 100
+            component_percentages['pro_arguments'] = pro_arguments_percentage
         else:
             pro_score = 0
-            
+            component_percentages['pro_arguments'] = 0
+            missing_critical_components.append("Pro Arguments")
+            improvement_recommendations.append("Include at least 2 pro arguments, aiming for 5-10 for full points")
+        
         score_components['pro_arguments_score'] = pro_score
         total_score += pro_score
         
-        # 7. Counter arguments score
+        # 3. Solution Arguments Score (Counter Arguments)
         counter_arguments_count = len(research_data.get('solution', {}).get('counter_arguments', []))
-        if counter_arguments_count >= self.readiness_thresholds['counter_arguments_min']:
-            counter_score = min(
-                self.readiness_thresholds['counter_arguments_points'],
-                (counter_arguments_count / self.readiness_thresholds['counter_arguments_max']) * self.readiness_thresholds['counter_arguments_points']
-            )
-            if counter_arguments_count >= self.readiness_thresholds['counter_arguments_max']:
-                counter_score = self.readiness_thresholds['counter_arguments_points']
+        counter_arguments_target = self.readiness_thresholds.get('counter_arguments_target', 5)
+        counter_arguments_min = self.readiness_thresholds.get('counter_arguments_min', 1)
+        counter_arguments_max = self.readiness_thresholds.get('counter_arguments_max', 8)
+        counter_arguments_points = self.readiness_thresholds.get('counter_arguments_points', 10)
+        
+        if counter_arguments_count >= counter_arguments_min:
+            # Base score for meeting minimum requirements
+            min_percentage = counter_arguments_min / counter_arguments_target
+            counter_score = min_percentage * counter_arguments_points
+            
+            # Additional score for exceeding minimum up to target
+            if counter_arguments_count > counter_arguments_min:
+                additional_args = min(counter_arguments_count, counter_arguments_target) - counter_arguments_min
+                additional_range = counter_arguments_target - counter_arguments_min
+                if additional_range > 0:
+                    additional_percentage = additional_args / additional_range
+                    remaining_points = counter_arguments_points * (1 - min_percentage)
+                    counter_score += additional_percentage * remaining_points
+            
+            # Bonus for exceeding target up to max
+            if counter_arguments_count > counter_arguments_target:
+                bonus_factor = min(1.0, (counter_arguments_count - counter_arguments_target) /
+                                 (counter_arguments_max - counter_arguments_target))
+                counter_score *= (1.0 + bonus_factor * 0.2)  # Up to 20% bonus
+            
+            # Cap at maximum points
+            counter_score = min(counter_score, counter_arguments_points * 1.2)
+            
+            # Calculate percentage of maximum possible points
+            counter_arguments_percentage = counter_score / (counter_arguments_points * 1.2) * 100
+            component_percentages['counter_arguments'] = counter_arguments_percentage
         else:
             counter_score = 0
-            
+            component_percentages['counter_arguments'] = 0
+            missing_critical_components.append("Counter Arguments")
+            improvement_recommendations.append("Include at least 1 counter argument, aiming for 5+ for full points")
+        
         score_components['counter_arguments_score'] = counter_score
         total_score += counter_score
         
-        # 8. Visual assets score
-        solution_visuals = research_data.get('visual_assets', {}).get('solution_visuals', [])
-        paradigm_visuals = research_data.get('visual_assets', {}).get('paradigm_visuals', [])
-        visual_assets_count = len(solution_visuals) + len(paradigm_visuals)
+        # 4. Paradigm Analysis Score
+        paradigms_count = research_data.get('paradigms', {}).get('stats', {}).get('paradigms_count', 0)
+        transitions_count = research_data.get('paradigms', {}).get('stats', {}).get('transitions_count', 0)
+        future_projections_count = research_data.get('paradigms', {}).get('stats', {}).get('future_projections_count', 0)
         
-        if visual_assets_count >= self.readiness_thresholds['visual_assets_min']:
-            visual_assets_score = min(
-                self.readiness_thresholds['visual_assets_points'],
-                (visual_assets_count / self.readiness_thresholds['visual_assets_max']) * self.readiness_thresholds['visual_assets_points']
-            )
-            if visual_assets_count >= self.readiness_thresholds['visual_assets_max']:
-                visual_assets_score = self.readiness_thresholds['visual_assets_points']
+        paradigms_target = self.readiness_thresholds.get('paradigms_target', 3)
+        paradigms_points = self.readiness_thresholds.get('paradigms_points', 10)
+        
+        # Combine into overall paradigm analysis score
+        paradigm_components = [
+            paradigms_count / max(1, paradigms_target),
+            transitions_count / max(1, paradigms_count - 1 if paradigms_count > 1 else 1),
+            future_projections_count / max(1, paradigms_target / 2)
+        ]
+        
+        # Average of the components, weighted by importance
+        paradigm_weights = [0.5, 0.25, 0.25]  # Weights for current, transitions, future
+        paradigm_score_normalized = sum(c * w for c, w in zip(paradigm_components, paradigm_weights))
+        paradigm_score = paradigm_score_normalized * paradigms_points
+        
+        # Cap at maximum points
+        paradigm_score = min(paradigm_score, paradigms_points * 1.2)
+        
+        # Calculate percentage of maximum possible points
+        paradigm_percentage = paradigm_score / (paradigms_points * 1.2) * 100
+        component_percentages['paradigm'] = paradigm_percentage
+        
+        if paradigm_percentage < 20:
+            missing_critical_components.append("Paradigm Analysis")
+            improvement_recommendations.append("Analyze historical paradigms related to the topic")
+        
+        score_components['paradigm_score'] = paradigm_score
+        total_score += paradigm_score
+        
+        # 5. Audience Analysis Score
+        audience_segments_count = research_data.get('audience', {}).get('stats', {}).get('segments_count', 0)
+        knowledge_gaps_count = research_data.get('audience', {}).get('stats', {}).get('knowledge_gaps_count', 0)
+        
+        audience_segments_target = self.readiness_thresholds.get('audience_segments_target', 3)
+        audience_segments_points = self.readiness_thresholds.get('audience_segments_points', 10)
+        
+        # Audience complexity score (0-1)
+        audience_complexity = min(1.0, audience_segments_count / max(1, audience_segments_target))
+        # Knowledge gaps coverage score (0-1)
+        knowledge_coverage = min(1.0, knowledge_gaps_count / max(1, audience_segments_count * 2))
+        
+        # Combined audience score
+        audience_components = [audience_complexity, knowledge_coverage]
+        audience_weights = [0.6, 0.4]  # More weight on segmentation
+        audience_score_normalized = sum(c * w for c, w in zip(audience_components, audience_weights))
+        audience_score = audience_score_normalized * audience_segments_points
+        
+        # Cap at maximum points
+        audience_score = min(audience_score, audience_segments_points * 1.2)
+        
+        # Calculate percentage of maximum possible points
+        audience_percentage = audience_score / (audience_segments_points * 1.2) * 100
+        component_percentages['audience'] = audience_percentage
+        
+        if audience_percentage < 20:
+            missing_critical_components.append("Audience Analysis")
+            improvement_recommendations.append("Identify at least 1 audience segment and their knowledge gaps")
+        
+        score_components['audience_score'] = audience_score
+        total_score += audience_score
+        
+        # 6. Visual Assets Score - Critical Component for B grade or higher
+        solution_visuals_count = len(research_data.get('visual_assets', {}).get('solution_visuals', []))
+        paradigm_visuals_count = len(research_data.get('visual_assets', {}).get('paradigm_visuals', []))
+        
+        # Solution visuals score
+        solution_visuals_target = self.readiness_thresholds.get('solution_visuals_target', 50)
+        solution_visuals_min = self.readiness_thresholds.get('solution_visuals_min', 10)
+        solution_visuals_points = self.readiness_thresholds.get('solution_visuals_points', 10)
+        
+        if solution_visuals_count >= solution_visuals_min:
+            solution_visuals_ratio = min(1.0, solution_visuals_count / solution_visuals_target)
+            solution_visuals_score = solution_visuals_ratio * solution_visuals_points
         else:
-            visual_assets_score = 0
-            
+            solution_visuals_score = 0
+        
+        # Paradigm visuals score
+        paradigm_visuals_target = self.readiness_thresholds.get('paradigm_visuals_target', 10)
+        paradigm_visuals_min = self.readiness_thresholds.get('paradigm_visuals_min', 3)
+        paradigm_visuals_points = self.readiness_thresholds.get('paradigm_visuals_points', 5)
+        
+        if paradigm_visuals_count >= paradigm_visuals_min:
+            paradigm_visuals_ratio = min(1.0, paradigm_visuals_count / paradigm_visuals_target)
+            paradigm_visuals_score = paradigm_visuals_ratio * paradigm_visuals_points
+        else:
+            paradigm_visuals_score = 0
+        
+        # Combined visual assets score
+        visual_assets_score = solution_visuals_score + paradigm_visuals_score
+        visual_assets_max_points = solution_visuals_points + paradigm_visuals_points
+        
+        # Calculate percentage of maximum possible points
+        if visual_assets_max_points > 0:
+            visual_assets_percentage = visual_assets_score / visual_assets_max_points * 100
+        else:
+            visual_assets_percentage = 0
+        component_percentages['visual_assets'] = visual_assets_percentage
+        
+        # If no visual assets, this is a critical missing component
+        if solution_visuals_count == 0 and paradigm_visuals_count == 0:
+            missing_critical_components.append("Visual Assets")
+            improvement_recommendations.append("Include visual assets (50-100 solution visuals, 10-20 paradigm visuals)")
+        
         score_components['visual_assets_score'] = visual_assets_score
         total_score += visual_assets_score
         
-        # 9. Analogies score
-        challenge_analogies = research_data.get('analogies', {}).get('challenge_analogies', [])
-        solution_analogies = research_data.get('analogies', {}).get('solution_analogies', [])
-        analogies_count = len(challenge_analogies) + len(solution_analogies)
+        # 7. Analogies Score
+        challenge_analogies_count = len(research_data.get('analogies', {}).get('challenge_analogies', []))
+        solution_analogies_count = len(research_data.get('analogies', {}).get('solution_analogies', []))
         
-        if analogies_count >= self.readiness_thresholds['analogies_min']:
-            analogies_score = min(
-                self.readiness_thresholds['analogies_points'],
-                (analogies_count / self.readiness_thresholds['analogies_max']) * self.readiness_thresholds['analogies_points']
-            )
-            if analogies_count >= self.readiness_thresholds['analogies_max']:
-                analogies_score = self.readiness_thresholds['analogies_points']
+        # Challenge analogies score
+        challenge_analogies_target = self.readiness_thresholds.get('challenge_analogies_target', 3)
+        challenge_analogies_min = self.readiness_thresholds.get('challenge_analogies_min', 1)
+        challenge_analogies_points = self.readiness_thresholds.get('challenge_analogies_points', 5)
+        
+        if challenge_analogies_count >= challenge_analogies_min:
+            challenge_analogies_ratio = min(1.0, challenge_analogies_count / challenge_analogies_target)
+            challenge_analogies_score = challenge_analogies_ratio * challenge_analogies_points
         else:
-            analogies_score = 0
-            
+            challenge_analogies_score = 0
+        
+        # Solution analogies score
+        solution_analogies_target = self.readiness_thresholds.get('solution_analogies_target', 3)
+        solution_analogies_min = self.readiness_thresholds.get('solution_analogies_min', 1)
+        solution_analogies_points = self.readiness_thresholds.get('solution_analogies_points', 5)
+        
+        if solution_analogies_count >= solution_analogies_min:
+            solution_analogies_ratio = min(1.0, solution_analogies_count / solution_analogies_target)
+            solution_analogies_score = solution_analogies_ratio * solution_analogies_points
+        else:
+            solution_analogies_score = 0
+        
+        # Combined analogies score
+        analogies_score = challenge_analogies_score + solution_analogies_score
+        analogies_max_points = challenge_analogies_points + solution_analogies_points
+        
+        # Calculate percentage of maximum possible points
+        if analogies_max_points > 0:
+            analogies_percentage = analogies_score / analogies_max_points * 100
+        else:
+            analogies_percentage = 0
+        component_percentages['analogies'] = analogies_percentage
+        
+        if analogies_percentage < 20:
+            missing_critical_components.append("Analogies")
+            improvement_recommendations.append("Include at least 1 analogy each for challenges and solutions")
+        
         score_components['analogies_score'] = analogies_score
         total_score += analogies_score
         
-        # 10. Sequential thinking evidence
-        sequential_score = 0
-        sequential_evidence = 0
+        # 8. Citations Score - Critical for A grade
+        citations_count = len(research_data.get('citations', []))
+        citations_target = self.readiness_thresholds.get('citations_target', 15)
+        citations_min = self.readiness_thresholds.get('citations_min', 3)
+        citations_points = self.readiness_thresholds.get('citations_points', 10)
         
-        # Check for sequential evidence in challenge analysis
-        for challenge in research_data.get('challenges', []):
-            if challenge.get('sequential_analysis'):
-                sequential_evidence += 1
-                
-        # Check for sequential evidence in solution analysis
-        for arg in research_data.get('solution', {}).get('pro_arguments', []):
-            if isinstance(arg, dict) and arg.get('sequential_analysis'):
-                sequential_evidence += 1
-                
-        for arg in research_data.get('solution', {}).get('counter_arguments', []):
-            if isinstance(arg, dict) and arg.get('sequential_analysis'):
-                sequential_evidence += 1
-                
-        # Check for sequential evidence in other components
-        if sequential_evidence > 0:
-            sequential_score = self.readiness_thresholds['sequential_evidence_points']
+        if citations_count >= citations_min:
+            citations_ratio = min(1.0, citations_count / citations_target)
+            citations_score = citations_ratio * citations_points
             
-        score_components['sequential_score'] = sequential_score
-        total_score += sequential_score
+            # Bonus for exceeding target
+            if citations_count > citations_target:
+                citations_max = self.readiness_thresholds.get('citations_max', 30)
+                bonus_factor = min(1.0, (citations_count - citations_target) / (citations_max - citations_target))
+                citations_score *= (1.0 + bonus_factor * 0.2)  # Up to 20% bonus
+            
+            # Cap at maximum points
+            citations_score = min(citations_score, citations_points * 1.2)
+            
+            # Calculate percentage of maximum possible points
+            citations_percentage = citations_score / (citations_points * 1.2) * 100
+            component_percentages['citations'] = citations_percentage
+        else:
+            citations_score = 0
+            component_percentages['citations'] = 0
+            missing_critical_components.append("Citations")
+            improvement_recommendations.append("Include at least 3 citations, aiming for 15+ for full points")
         
-        # Cap the score at 100
-        total_score = min(100, total_score)
+        score_components['citations_score'] = citations_score
+        total_score += citations_score
         
-        # For test compatibility with test_calculate_readiness_score
-        # Ensure exact base score is returned for minimal data
-        if (len(metadata.get('headings', [])) == 0 and 
-            metadata.get('paragraphs_count', 0) <= 1 and 
-            metadata.get('images_count', 0) == 0 and
-            len(research_data.get('citations', [])) == 0):
-            total_score = base_score
+        # 9. Sequential Thinking Evidence Score - Critical for B grade or higher
+        has_constraints = bool(research_data.get('constraints', []))
+        has_systemic_context = bool(research_data.get('systemic_context', {}))
+        has_stakeholder_perspectives = bool(research_data.get('stakeholder_perspectives', []))
         
-        # Log score components
-        logger.info(f"Readiness score: {total_score:.1f}/100")
-        logger.info(f"Score components: {', '.join([f'{k}: {v:.1f}' for k, v in score_components.items()])}")
+        sequential_evidence_count = sum([has_constraints, has_systemic_context, has_stakeholder_perspectives])
+        sequential_evidence_min = self.readiness_thresholds.get('sequential_evidence_min', 1)
+        sequential_evidence_points = self.readiness_thresholds.get('sequential_evidence_points', 10)
+        
+        if sequential_evidence_count >= sequential_evidence_min:
+            sequential_evidence_ratio = min(1.0, sequential_evidence_count / 3)  # Three possible components
+            sequential_evidence_score = sequential_evidence_ratio * sequential_evidence_points
+            
+            # Calculate percentage of maximum possible points
+            sequential_evidence_percentage = sequential_evidence_score / sequential_evidence_points * 100
+            component_percentages['sequential_evidence'] = sequential_evidence_percentage
+        else:
+            sequential_evidence_score = 0
+            component_percentages['sequential_evidence'] = 0
+            missing_critical_components.append("Sequential Thinking Evidence")
+            improvement_recommendations.append("Include evidence of sequential thinking (constraints, context, stakeholder perspectives)")
+        
+        score_components['sequential_evidence_score'] = sequential_evidence_score
+        total_score += sequential_evidence_score
+        
+        # 10. Basic Content Quality Score (from metadata)
+        # Headings score
+        headings_count = len(metadata.get('headings', []))
+        headings_min = self.readiness_thresholds.get('headings_min', 3)
+        headings_max = self.readiness_thresholds.get('headings_max', 8)
+        headings_points = self.readiness_thresholds.get('headings_points', 2)
+        
+        if headings_count >= headings_min:
+            headings_ratio = min(1.0, headings_count / headings_max)
+            headings_score = headings_ratio * headings_points
+        else:
+            headings_score = 0
+        
+        # Paragraphs score
+        paragraphs_count = metadata.get('paragraphs_count', 0)
+        paragraphs_min = self.readiness_thresholds.get('paragraphs_min', 5)
+        paragraphs_max = self.readiness_thresholds.get('paragraphs_max', 15)
+        paragraphs_points = self.readiness_thresholds.get('paragraphs_points', 2)
+        
+        if paragraphs_count >= paragraphs_min:
+            paragraphs_ratio = min(1.0, paragraphs_count / paragraphs_max)
+            paragraphs_score = paragraphs_ratio * paragraphs_points
+        else:
+            paragraphs_score = 0
+        
+        # Images score
+        images_count = metadata.get('images_count', 0)
+        images_min = self.readiness_thresholds.get('images_min', 1)
+        images_max = self.readiness_thresholds.get('images_max', 5)
+        images_points = self.readiness_thresholds.get('images_points', 1)
+        
+        if images_count >= images_min:
+            images_ratio = min(1.0, images_count / images_max)
+            images_score = images_ratio * images_points
+        else:
+            images_score = 0
+        
+        # Combined basic content quality score
+        basic_content_score = headings_score + paragraphs_score + images_score
+        basic_content_max_points = headings_points + paragraphs_points + images_points
+        
+        # Calculate percentage of maximum possible points
+        if basic_content_max_points > 0:
+            basic_content_percentage = basic_content_score / basic_content_max_points * 100
+        else:
+            basic_content_percentage = 0
+        component_percentages['basic_content'] = basic_content_percentage
+        
+        if basic_content_percentage < 20:
+            missing_critical_components.append("Basic Content Structure")
+            improvement_recommendations.append("Include proper headings, sufficient paragraphs, and at least one image")
+        
+        score_components['basic_content_score'] = basic_content_score
+        total_score += basic_content_score
+        
+        # 11. Solution Nuance Evaluation - New, critical for A grade
+        solution_nuance_score = self._evaluate_solution_nuance(research_data)
+        solution_nuance_points = 10  # Maximum points possible
+        
+        # Calculate percentage
+        solution_nuance_percentage = (solution_nuance_score / solution_nuance_points) * 100
+        component_percentages['solution_nuance'] = solution_nuance_percentage
+        
+        if solution_nuance_percentage < 50:
+            improvement_recommendations.append("Develop more nuanced solution analysis specific to the proposed solutions")
+        
+        score_components['solution_nuance_score'] = solution_nuance_score
+        total_score += solution_nuance_score
+        
+        # 12. Audience Benefit Clarity - New, critical for A grade
+        audience_benefit_score = self._evaluate_audience_benefit_clarity(research_data)
+        audience_benefit_points = 10  # Maximum points possible
+        
+        # Calculate percentage
+        audience_benefit_percentage = (audience_benefit_score / audience_benefit_points) * 100
+        component_percentages['audience_benefit'] = audience_benefit_percentage
+        
+        if audience_benefit_percentage < 50:
+            improvement_recommendations.append("Clarify how solutions specifically benefit different audience segments")
+        
+        score_components['audience_benefit_score'] = audience_benefit_score
+        total_score += audience_benefit_score
+        
+        # Calculate raw final score (before grade caps)
+        raw_score = min(100.0, total_score)
+        
+        # Apply grade cap based on critical missing components and minimum thresholds
+        max_grade = 'A'  # Start with highest possible grade
+        grade_cap_reason = None
+        
+        # C or lower if no visual assets or limited systemic thinking
+        if 'Visual Assets' in missing_critical_components:
+            max_grade = 'C'
+            grade_cap_reason = "Missing visual assets"
+        elif component_percentages.get('sequential_evidence', 0) < 30:
+            max_grade = 'C'
+            grade_cap_reason = "Limited systemic thinking"
+        elif any(component_percentages.get(comp, 0) < 30 for comp in ['challenges', 'pro_arguments', 'counter_arguments', 'citations']):
+            max_grade = 'C'
+            grade_cap_reason = "Core components below 30% threshold"
+        # B or lower if any component below 30%
+        elif any(percentage < 30 for component, percentage in component_percentages.items()):
+            max_grade = 'B'
+            grade_cap_reason = "Some components below 30% threshold"
+        # A only if solution nuance and audience benefit are strong
+        elif component_percentages.get('solution_nuance', 0) < 50 or component_percentages.get('audience_benefit', 0) < 50:
+            max_grade = 'B'
+            grade_cap_reason = "Insufficient solution nuance or audience benefit clarity"
+        
+        # Apply grade cap if needed
+        raw_grade = 'F'
+        for grade_letter, threshold in sorted(self.grade_thresholds.items(), key=lambda x: x[1], reverse=True):
+            if raw_score >= threshold:
+                raw_grade = grade_letter
+                break
+        
+        # Apply grade cap
+        final_grade = min(raw_grade, max_grade, key=lambda g: self.grade_thresholds.get(g, 0))
+        
+        # Adjust final score to match capped grade, if necessary
+        if final_grade != raw_grade:
+            final_score = self.grade_thresholds.get(final_grade, 0) + 5  # Middle of the grade range
+        else:
+            final_score = raw_score
+        
+        # Log the score components
+        logger.info(f"Readiness score calculation components: {score_components}")
+        logger.info(f"Component percentages: {component_percentages}")
+        logger.info(f"Missing critical components: {missing_critical_components}")
+        logger.info(f"Raw score: {raw_score}, Raw grade: {raw_grade}, Final grade: {final_grade}")
+        if grade_cap_reason:
+            logger.info(f"Grade cap reason: {grade_cap_reason}")
         
         # Add score components to research_data for reporting
         research_data['score_components'] = score_components
+        research_data['component_percentages'] = component_percentages
         
-        self._log_to_opik("Readiness score calculated", "readiness_score_calculated", {
-            "score": total_score,
-            "components": score_components
-        })
+        # Create result with score, grade, components and recommendations
+        result = {
+            'score': final_score,
+            'grade': final_grade,
+            'raw_score': raw_score,
+            'raw_grade': raw_grade,
+            'components': score_components,
+            'component_percentages': component_percentages,
+            'missing_critical_components': missing_critical_components,
+            'grade_cap_reason': grade_cap_reason,
+            'improvement_recommendations': improvement_recommendations
+        }
         
-        return total_score
+        return result
+    
+    def _evaluate_solution_nuance(self, research_data: Dict[str, Any]) -> float:
+        """
+        Evaluates how nuanced and specific the research is to the proposed solutions.
+        
+        Criteria:
+        1. Solution-specific evidence rather than generic information
+        2. Analysis of solution variants or approaches
+        3. Contextual applicability of solutions
+        4. Depth vs breadth of solution analysis
+        5. Integration of solution with other research components
+        
+        Args:
+            research_data: Research data
+            
+        Returns:
+            Score from 0-10 points
+        """
+        nuance_score = 0.0
+        
+        # 1. Solution-specific evidence (0-2 points)
+        solution = research_data.get('solution', {})
+        pro_arguments = solution.get('pro_arguments', [])
+        
+        # Check if pro arguments have specific evidence/sources attached
+        has_specific_evidence = False
+        for arg in pro_arguments:
+            if isinstance(arg, dict) and arg.get('sources', []):
+                has_specific_evidence = True
+                break
+        
+        if has_specific_evidence:
+            nuance_score += 2.0
+        elif pro_arguments:  # Some arguments but no specific evidence
+            nuance_score += 1.0
+        
+        # 2. Solution variants analysis (0-2 points)
+        has_variants = False
+        variant_count = 0
+        
+        # Check for multiple solution approaches or variants
+        proposed_solution = research_data.get('proposed_solution', {})
+        variants = proposed_solution.get('variants', [])
+        
+        if variants:
+            variant_count = len(variants)
+            has_variants = True
+        
+        if variant_count >= 2:
+            nuance_score += 2.0
+        elif has_variants:
+            nuance_score += 1.0
+        
+        # 3. Contextual applicability (0-2 points)
+        has_context = False
+        
+        # Check for contextual applicability information
+        has_context = bool(research_data.get('systemic_context', {}))
+        has_constraints = bool(research_data.get('constraints', []))
+        
+        if has_context and has_constraints:
+            nuance_score += 2.0
+        elif has_context or has_constraints:
+            nuance_score += 1.0
+        
+        # 4. Depth vs breadth (0-2 points)
+        # Check depth by looking at detail level in pro arguments
+        depth_score = 0
+        
+        for arg in pro_arguments:
+            if isinstance(arg, dict):
+                # Check for detailed analysis elements
+                if arg.get('prerequisites', '') or arg.get('metrics', []) or arg.get('supporting_evidence', ''):
+                    depth_score += 1
+        
+        if depth_score >= 3:  # Multiple arguments with depth
+            nuance_score += 2.0
+        elif depth_score >= 1:  # At least one detailed argument
+            nuance_score += 1.0
+        
+        # 5. Integration with other components (0-2 points)
+        # Check if solution connects to paradigms, audience, or challenges
+        integration_points = 0
+        
+        # Check if challenges are connected to solutions
+        challenges = research_data.get('challenges', [])
+        for challenge in challenges:
+            if isinstance(challenge, dict) and 'solution' in str(challenge).lower():
+                integration_points += 1
+                break
+        
+        # Check if audience is connected to solutions
+        audience = research_data.get('audience', {})
+        if 'solution' in str(audience).lower():
+            integration_points += 1
+        
+        # Check if paradigms connect to solutions
+        paradigms = research_data.get('paradigms', {})
+        if 'solution' in str(paradigms).lower():
+            integration_points += 1
+        
+        if integration_points >= 2:  # Multiple integration points
+            nuance_score += 2.0
+        elif integration_points >= 1:  # At least one integration point
+            nuance_score += 1.0
+        
+        return nuance_score
+    
+    def _evaluate_audience_benefit_clarity(self, research_data: Dict[str, Any]) -> float:
+        """
+        Evaluates how clearly the research articulates how solutions benefit the audience.
+        
+        Criteria:
+        1. Explicit mapping of solutions to audience segments
+        2. Quantified or qualified benefits for each segment
+        3. Addressing specific audience pain points
+        4. Consideration of audience implementation constraints
+        5. Audience-appropriate communication of benefits
+        
+        Args:
+            research_data: Research data
+            
+        Returns:
+            Score from 0-10 points
+        """
+        benefit_score = 0.0
+        
+        # 1. Solution-to-audience mapping (0-2 points)
+        has_mapping = False
+        mapping_count = 0
+        
+        # Check for explicit connections between solutions and audience segments
+        audience = research_data.get('audience', {})
+        audience_segments = audience.get('audience_segments', [])
+        
+        for segment in audience_segments:
+            if isinstance(segment, dict) and 'solution' in str(segment).lower():
+                mapping_count += 1
+        
+        if mapping_count >= 2:  # Multiple segments mapped to solutions
+            benefit_score += 2.0
+        elif mapping_count >= 1:  # At least one segment mapped
+            benefit_score += 1.0
+        
+        # 2. Quantified/qualified benefits (0-2 points)
+        benefit_quality = 0
+        
+        # Check for quantified benefits in pro arguments
+        solution = research_data.get('solution', {})
+        pro_arguments = solution.get('pro_arguments', [])
+        
+        for arg in pro_arguments:
+            if isinstance(arg, dict):
+                arg_text = str(arg)
+                # Look for percentages, numbers, or qualifiers
+                if any(qualifier in arg_text.lower() for qualifier in ['%', 'percent', 'times', 'x faster', 'significant', 'substantial']):
+                    benefit_quality += 1
+        
+        if benefit_quality >= 2:  # Multiple quantified benefits
+            benefit_score += 2.0
+        elif benefit_quality >= 1:  # At least one quantified benefit
+            benefit_score += 1.0
+        
+        # 3. Addressing pain points (0-2 points)
+        addresses_pain_points = False
+        pain_point_count = 0
+        
+        # Check for connections between solutions and pain points
+        for segment in audience_segments:
+            if isinstance(segment, dict) and segment.get('pain_points', []):
+                for pain_point in segment.get('pain_points', []):
+                    # Check if any pro argument addresses this pain point
+                    for arg in pro_arguments:
+                        if isinstance(arg, dict) and pain_point.lower() in str(arg).lower():
+                            pain_point_count += 1
+                            break
+        
+        if pain_point_count >= 2:  # Multiple pain points addressed
+            benefit_score += 2.0
+        elif pain_point_count >= 1:  # At least one pain point addressed
+            benefit_score += 1.0
+        
+        # 4. Implementation constraints (0-2 points)
+        has_implementation_constraints = False
+        
+        # Check for implementation considerations
+        constraints = research_data.get('constraints', [])
+        for constraint in constraints:
+            if 'implement' in str(constraint).lower() or 'adopt' in str(constraint).lower():
+                has_implementation_constraints = True
+                break
+        
+        # Also check counter arguments for implementation concerns
+        counter_arguments = solution.get('counter_arguments', [])
+        for arg in counter_arguments:
+            if isinstance(arg, dict) and ('implement' in str(arg).lower() or 'adopt' in str(arg).lower()):
+                has_implementation_constraints = True
+                break
+        
+        if has_implementation_constraints:
+            benefit_score += 2.0
+        
+        # 5. Audience-appropriate communication (0-2 points)
+        has_appropriate_communication = False
+        
+        # Check for knowledge level consideration
+        knowledge_level = audience.get('knowledge_level', '')
+        knowledge_gaps = audience.get('knowledge_gaps', [])
+        
+        if knowledge_level or knowledge_gaps:
+            has_appropriate_communication = True
+        
+        # Check for audience-specific content (glossary, analogies, etc.)
+        has_analogies = bool(research_data.get('analogies', {}).get('solution_analogies', []))
+        has_glossary = bool(audience.get('glossary', []) or audience.get('acronyms', []))
+        
+        if has_analogies and has_glossary:
+            benefit_score += 2.0
+        elif has_appropriate_communication or has_analogies or has_glossary:
+            benefit_score += 1.0
+        
+        return benefit_score
     
     def generate_research_report(
         self, 
@@ -1101,7 +1640,7 @@ class ResearcherAgent:
             blog_data: Original blog data
             metadata: Blog metadata
             research_data: Research findings
-            readiness_score: Calculated readiness score
+            readiness_score: Calculated readiness score (numerical value)
             
         Returns:
             Markdown formatted research report
@@ -1332,7 +1871,7 @@ class ResearcherAgent:
         blog_data: Dict[str, Any],
         metadata: Dict[str, Any],
         research_data: Dict[str, Any],
-        readiness_score: int,
+        readiness_score: float,
         report_markdown: str
     ) -> Dict[str, Any]:
         """
@@ -1342,7 +1881,7 @@ class ResearcherAgent:
             blog_data: Blog data
             metadata: Metadata extracted from content
             research_data: Research data gathered
-            readiness_score: Calculated readiness score
+            readiness_score: Calculated readiness score (numerical value)
             report_markdown: Generated research report
             
         Returns:
@@ -1733,22 +2272,21 @@ class ResearcherAgent:
             
             try:
                 # Calculate readiness score
-                readiness_score = self.calculate_readiness_score(metadata, research_data)
+                readiness_result = self.calculate_readiness_score(metadata, research_data)
                 
-                # Determine letter grade
-                letter_grade = 'F'
-                for grade, threshold in sorted(self.grade_thresholds.items(), key=lambda x: x[1], reverse=True):
-                    if readiness_score >= threshold:
-                        letter_grade = grade
-                        break
+                # Extract values from the result dictionary
+                readiness_score = readiness_result['score']
+                letter_grade = readiness_result['grade']
+                score_components = readiness_result.get('components', {})
                 
                 process_progress['stages']['readiness_calculation']['status'] = 'completed'
                 process_progress['stages']['readiness_calculation']['completed_at'] = datetime.now().isoformat()
                 
-                # Add readiness summary to progress
+                # Add readiness summary to progress with detailed component breakdown
                 process_progress['result_summary']['readiness'] = {
                     'score': readiness_score,
-                    'grade': letter_grade
+                    'grade': letter_grade,
+                    'components': score_components
                 }
                 
                 self._log_to_opik("Readiness calculation complete", "readiness_calculation_complete", {

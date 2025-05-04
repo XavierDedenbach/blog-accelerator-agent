@@ -317,10 +317,10 @@ def test_gather_research(mock_source_validator, mock_firecrawl_client):
 
 
 def test_calculate_readiness_score(mock_source_validator, mock_firecrawl_client):
-    """Test calculating readiness score."""
+    """Test calculating readiness score with enhanced criteria."""
     agent = ResearcherAgent()
     
-    # Test with minimal data (should get base score)
+    # Test with minimal data (should get base score with F grade)
     metadata = {
         'headings': [],
         'paragraphs_count': 1,
@@ -333,24 +333,54 @@ def test_calculate_readiness_score(mock_source_validator, mock_firecrawl_client)
         'citations': []
     }
     
-    score = agent.calculate_readiness_score(metadata, research_data)
-    assert score == 50  # Base score
+    result = agent.calculate_readiness_score(metadata, research_data)
+    assert isinstance(result, dict)
+    assert 'score' in result
+    assert 'grade' in result
+    assert 'components' in result
+    assert 'missing_critical_components' in result
+    assert 'improvement_recommendations' in result
+    assert 'component_percentages' in result
+    assert 'grade_cap_reason' in result
     
-    # Test with more complete data (should get higher score)
-    metadata = {
-        'headings': ['Title', 'Introduction', 'Main Section', 'Conclusion'],
-        'paragraphs_count': 6,
-        'images_count': 2,
-        'has_code_blocks': True,
-        'has_tables': True,
-        'has_lists': True
-    }
+    # Test base score is now 30 (reduced from 50)
+    assert result['components']['base_score'] == 30.0
+    
+    # Test grade is F due to very minimal content
+    assert result['grade'] == 'F'
+    assert len(result['missing_critical_components']) > 0
+    assert "Visual Assets" in result['missing_critical_components']
+    
+    # Test with more complete data but missing visual assets
+    # This should result in a higher raw score but capped at grade F due to missing visual assets
     research_data = {
-        'citations': [{'title': 'Citation 1'}, {'title': 'Citation 2'}, {'title': 'Citation 3'}]
+        'challenges': [{'title': 'Challenge 1'}, {'title': 'Challenge 2'}, {'title': 'Challenge 3'}],
+        'solution': {
+            'pro_arguments': [{'text': 'Pro 1'}, {'text': 'Pro 2'}, {'text': 'Pro 3'}],
+            'counter_arguments': [{'text': 'Counter 1'}, {'text': 'Counter 2'}]
+        },
+        'paradigms': {'stats': {'paradigms_count': 2, 'transitions_count': 1, 'future_projections_count': 1}},
+        'audience': {'stats': {'segments_count': 2, 'knowledge_gaps_count': 2}},
+        'visual_assets': {'solution_visuals': [], 'paradigm_visuals': []}, # No visual assets
+        'analogies': {'challenge_analogies': [{'text': 'Analogy 1'}], 'solution_analogies': [{'text': 'Analogy 1'}]},
+        'citations': [{'title': 'Citation 1'}, {'title': 'Citation 2'}, {'title': 'Citation 3'}],
+        'sequential_thinking_evidence': ['Evidence 1', 'Evidence 2']
     }
     
-    score = agent.calculate_readiness_score(metadata, research_data)
-    assert score > 50  # Should be higher than base score
+    result = agent.calculate_readiness_score(metadata, research_data)
+    assert isinstance(result, dict)
+    assert result['score'] > 30.0  # Should be higher than base score
+    assert result['raw_score'] >= result['score']  # Raw score should be equal to or higher than final score
+    assert "Visual Assets" in result['missing_critical_components']
+    assert result['grade'] == 'F'  # Should be F due to missing visual assets
+    assert result['grade_cap_reason'] is not None
+    
+    # Ensure improvement recommendations are provided
+    assert len(result['improvement_recommendations']) > 0
+    
+    # Check component percentages are calculated and reasonable
+    assert 'component_percentages' in result
+    assert all(0 <= perc <= 100 for perc in result['component_percentages'].values())
 
 
 def test_generate_research_report(mock_source_validator, mock_firecrawl_client):
@@ -516,7 +546,7 @@ def test_process_blog_markdown_file(mock_source_validator, mock_firecrawl_client
                                 mock_process_md.return_value = blog_data
                                 mock_extract.return_value = {'headings': [], 'blog_title': 'test-blog', 'main_topic': 'Test Topic'}
                                 mock_gather.return_value = {'citations': []}
-                                mock_score.return_value = 75
+                                mock_score.return_value = {'score': 75.0, 'grade': 'B', 'components': {'base_score': 50.0, 'citations_score': 10.0}}
                                 mock_report.return_value = "# Test Report"
                                 mock_save.return_value = {
                                     "status": "success",
@@ -544,7 +574,8 @@ def test_process_blog_markdown_file(mock_source_validator, mock_firecrawl_client
                                 assert result['status'] == 'success'
                                 assert result['blog_id'] == 'test_blog_id'
                                 assert result['blog_title'] == 'test-blog'
-                                assert result['readiness_score'] == 75
+                                assert result['readiness_score'] == 75.0
+                                assert result['readiness_grade'] == 'B'
                                 assert 'progress' in result
 
 
@@ -575,7 +606,7 @@ def test_process_blog_zip_file(mock_source_validator, mock_firecrawl_client):
                                 mock_process_upload.return_value = blog_data
                                 mock_extract.return_value = {'headings': [], 'blog_title': 'test-blog', 'main_topic': 'Test Topic'}
                                 mock_gather.return_value = {'citations': []}
-                                mock_score.return_value = 75
+                                mock_score.return_value = {'score': 75.0, 'grade': 'B', 'components': {'base_score': 50.0, 'citations_score': 10.0}}
                                 mock_report.return_value = "# Test Report"
                                 mock_save.return_value = {
                                     "status": "success",
@@ -603,7 +634,8 @@ def test_process_blog_zip_file(mock_source_validator, mock_firecrawl_client):
                                 assert result['status'] == 'success'
                                 assert result['blog_id'] == 'test_blog_id'
                                 assert result['blog_title'] == 'test-blog'
-                                assert result['readiness_score'] == 75
+                                assert result['readiness_score'] == 75.0
+                                assert result['readiness_grade'] == 'B'
                                 assert 'progress' in result
 
 

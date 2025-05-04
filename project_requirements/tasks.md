@@ -100,13 +100,23 @@ blog-accelerator-agent/
 * **Expected Output**: Enhanced DB schema with comprehensive research data storage
 
 ### 6. Readiness Score Calculation Implementation
-* **TODO**: Implement the readiness score algorithm based on PRD requirements
+* **TODO**: Implement the enhanced readiness score algorithm based on nuanced analysis requirements
 * **Implementation Details**:
-  * Create scoring function in `researcher_agent.py`
-  * Score components: challenges count, pro/con arguments, visual assets count, analogies count
-  * Calculate A-F grade based on minimum requirements from PRD
-  * Add detailed breakdown of score components
-* **Expected Output**: Function that returns a letter grade with score breakdown
+  * Revise scoring function in `researcher_agent.py` with the following improvements:
+    * Reduce base score from 50 to 30 points
+    * Implement category-specific evaluators for visual assets, systemic thinking, citations, etc.
+    * Create specialized evaluators for solution nuance and audience benefit clarity
+    * Add quality gates requiring minimum 30% in all categories for B grade
+    * Add automatic C grade (or lower) for missing visual assets or limited systemic thinking
+    * Adjust grade thresholds to ensure A grades are reserved for truly exceptional content
+  * New scoring criteria:
+    * Grade C or below (≤ 70%) for content with any missing critical components
+    * Grade B (71-85%) for content with minimum 30% in EACH category
+    * Grade A (86-100%) requiring rich visual assets, strong systemic thinking, proper citations,
+      nuanced solution research, and clear articulation of audience benefits
+  * Add comprehensive feedback component that explains grade and provides improvement guidance
+  * Create detailed test cases to validate scoring accuracy
+* **Expected Output**: Enhanced function that returns more accurate letter grades with detailed explanation and improvement recommendations
 
 ### 7. API Documentation and Testing
 * **Already Implemented**: Basic API endpoints
