@@ -106,17 +106,23 @@ class IndustryAnalyzer:
             Assume the context often involves small, resource-constrained teams (like hardware startups) facing these challenges.
 
             **Step 1: Reflect on Core Constraints**
-            Before identifying challenges, briefly consider the inherent difficulties and constraints related to '{topic}', especially for smaller players. Think about factors like:
-            - Resource limitations (funding, personnel)
-            - Interdisciplinary complexity
-            - Physical vs. digital constraints (if applicable)
-            - Long development cycles or high iteration costs
-            - Supply chain dependencies
-            - Regulatory hurdles
+            Before identifying challenges, briefly consider the inherent difficulties and constraints related to '{topic}'. 
+            Focus specifically on how these challenges affect different user roles/personas mentioned in the topic.
+            Key considerations:
+            - Who are the specific USER TYPES or ROLES mentioned in the topic (e.g., "policy makers", "developers", "engineers", "healthcare providers")?
+            - What SPECIFIC CONSTRAINTS do these user types face (budget limits, technical knowledge, decision authority)?
+            - How are these user types UNIQUELY AFFECTED by limitations in:
+              - Resource availability (funding, personnel)
+              - Domain expertise and knowledge gaps
+              - Technical capabilities or access
+              - Regulatory or compliance requirements
+              - Decision-making authority and processes
+              - Physical vs. digital constraints (if applicable)
+              - Time constraints and urgency factors
 
             **Step 2: Identify Critical Challenges**
             Based on your reflection and the topic '{topic}', identify at least {min_challenges} critical challenges facing the relevant industry or system. Focus on challenges that are:
-            1. Significant and impactful, exacerbated by the constraints identified in Step 1
+            1. Significant and impactful for the SPECIFIC USER TYPES identified in Step 1
             2. Measurable or observable
             3. Relevant to the topic
             4. Diverse in nature (technical, economic, operational, regulatory, etc.)
@@ -124,14 +130,14 @@ class IndustryAnalyzer:
 
             For each challenge:
             1. Provide a clear name
-            2. Write a detailed description (2-3 sentences), explaining *why* it's a challenge, linking back to the core constraints where possible.
-            3. Explain why this is a *critical* challenge in this context.
+            2. Write a detailed description (2-3 sentences), explaining *why* it's a challenge SPECIFICALLY FOR THE USER TYPES identified
+            3. Explain why this is a *critical* challenge for these user types
             4. Suggest search terms to find authoritative sources about this challenge, considering the nuances discussed.
 
             Format your response as a JSON array of challenge objects with these fields:
             - name: Name of the challenge
-            - description: Detailed description linking to constraints
-            - criticality: Explanation of why it's critical in context
+            - description: Detailed description linked to user types and their constraints
+            - criticality: Explanation of why it's critical for specific user types
             - search_terms: Array of nuanced search terms
 
             Only respond with the JSON array.
