@@ -104,118 +104,132 @@ class ParadigmAnalyzer:
         self.identify_paradigms_prompt = PromptTemplate(
             input_variables=["topic", "min_paradigms"],
             template="""You are analyzing the historical paradigms related to the topic: {topic}.
-            
-Your task is to identify at least {min_paradigms} significant historical paradigms related to this topic. 
-Focus on paradigms that are:
-1. Distinct approaches or worldviews
-2. Historically significant
-3. Well-documented with authoritative sources
-4. Showing clear progression or evolution over time
-5. Relevant to understanding the current and future state of the topic
 
-For each paradigm:
-1. Provide a clear name
-2. Write a detailed description (2-3 sentences)
-3. Specify the approximate time period when this paradigm was dominant
-4. Explain key characteristics that defined this paradigm
-5. Suggest search terms to find authoritative sources about this paradigm
+            **Step 1: Reflect on Core Drivers & Constraints**
+            Before identifying specific paradigms, briefly consider the underlying technological, economic, social, or scientific drivers and constraints that have shaped the evolution of '{topic}' over time. Think about fundamental limitations or breakthroughs that might define different eras.
 
-Format your response as a JSON array of paradigm objects with these fields:
-- name: Name of the paradigm
-- description: Detailed description
-- time_period: Approximate time period (e.g., "1950s-1970s", "Late 19th century")
-- key_characteristics: Array of key characteristics
-- search_terms: Array of search terms to find sources
+            **Step 2: Identify Historical Paradigms**
+            Based on your reflection and the topic '{topic}', identify at least {min_paradigms} significant historical paradigms. Focus on paradigms that represent distinct approaches, worldviews, or sets of core assumptions influenced by the drivers/constraints identified in Step 1. Ensure they are:
+            1. Distinct and well-defined
+            2. Historically significant and well-documented
+            3. Show clear progression or shifts related to the core drivers/constraints
+            4. Relevant to understanding the current state
 
-Only respond with the JSON array. Include at least {min_paradigms} paradigms in chronological order.
-"""
+            For each paradigm:
+            1. Provide a clear name
+            2. Write a detailed description (2-3 sentences), linking it back to the core drivers/constraints where possible.
+            3. Specify the approximate time period
+            4. Explain key characteristics defining this paradigm, reflecting the context of Step 1.
+            5. Suggest search terms to find authoritative sources, considering the nuances.
+
+            Format your response as a JSON array of paradigm objects with these fields:
+            - name: Name of the paradigm
+            - description: Detailed description linking to drivers/constraints
+            - time_period: Approximate time period
+            - key_characteristics: Array of context-aware characteristics
+            - search_terms: Array of nuanced search terms
+
+            Only respond with the JSON array. Include at least {min_paradigms} paradigms in chronological order.
+            """
         )
         
         self.analyze_transitions_prompt = PromptTemplate(
             input_variables=["paradigms"],
-            template="""You are analyzing the transitions between historical paradigms.
+            template="""You are analyzing the transitions between historical paradigms, focusing on the underlying causes.
 
-Below are the paradigms in chronological order:
-{paradigms}
+            Paradigms (in chronological order):
+            {paradigms}
 
-Your task is to analyze the transitions between these paradigms. For each transition:
-1. Identify what factors led to the shift from one paradigm to the next
-2. Explain key innovations or discoveries that enabled the transition
-3. Identify any resistance to change and how it was overcome
-4. Note any parallel or competing paradigms during the transition period
+            **Step 1: Reflect on Transition Dynamics**
+            Consider the paradigms provided. What kinds of factors typically drive shifts between such paradigms in this field? Think about technological breakthroughs, market changes, new theoretical insights, failures of the old paradigm, or external pressures. How might the core drivers/constraints identified previously play a role?
 
-Format your response as a JSON array of transition objects with these fields:
-- from_paradigm: Name of the earlier paradigm
-- to_paradigm: Name of the later paradigm
-- factors: Array of factors that led to the shift
-- key_innovations: Array of innovations or discoveries that enabled the transition
-- resistance: Description of resistance to change and how it was overcome
-- competing_paradigms: Array of any competing paradigms during the transition
+            **Step 2: Analyze Specific Transitions**
+            Based on your reflection, analyze the transition *between each consecutive pair* of paradigms listed above.
+            For each transition:
+            1. Identify the 'From' and 'To' paradigms.
+            2. Describe the key factors and events that triggered or facilitated this shift, linking back to the dynamics considered in Step 1.
+            3. Explain the primary tensions or conflicts between the outgoing and incoming paradigms.
+            4. Estimate the approximate timeframe of the transition period.
 
-Only respond with the JSON array. Include an analysis for each transition between consecutive paradigms.
-"""
+            Format your response as a JSON array of transition objects with these fields:
+            - from_paradigm: Name of the earlier paradigm
+            - to_paradigm: Name of the later paradigm
+            - trigger_factors: Description of key factors/events causing the shift (linked to dynamics)
+            - core_tensions: Explanation of conflicts between the paradigms
+            - transition_period: Approximate timeframe (e.g., "Late 1980s")
+
+            Only respond with the JSON array.
+            """
         )
         
         self.extract_lessons_prompt = PromptTemplate(
             input_variables=["paradigms", "transitions"],
-            template="""You are extracting lessons and patterns from historical paradigm shifts.
+            template="""You are extracting actionable lessons from historical paradigm shifts related to a topic.
 
-Below are the paradigms in chronological order:
-{paradigms}
+            Historical Paradigms:
+            {paradigms}
 
-And here are the transitions between them:
-{transitions}
+            Paradigm Transitions:
+            {transitions}
 
-Your task is to extract key lessons and patterns from these historical examples that might be relevant to understanding future paradigm shifts. Focus on:
-1. Common patterns in how paradigms evolve
-2. Factors that consistently lead to paradigm shifts
-3. Indicators that might predict when a paradigm is nearing its end
-4. Lessons for innovators trying to introduce new paradigms
+            **Step 1: Reflect on Patterns and Consequences**
+            Consider the historical evolution described by the paradigms and transitions. What recurring patterns emerge? Think about common pitfalls, successful adaptation strategies, the impact of ignoring anomalies, or the consequences of resisting change in this field. How do the core drivers/constraints influence these patterns?
 
-Format your response as a JSON object with these fields:
-- evolution_patterns: Array of patterns in how paradigms evolve
-- shift_factors: Array of factors that consistently lead to paradigm shifts
-- end_indicators: Array of indicators that might predict when a paradigm is nearing its end
-- innovation_lessons: Array of lessons for innovators
+            **Step 2: Extract Key Lessons**
+            Based on your reflection, extract 5-7 key lessons learned from these historical shifts that are relevant for understanding the topic today and navigating future changes.
+            For each lesson:
+            1. State the lesson clearly and concisely.
+            2. Provide a brief explanation (2-3 sentences) grounding the lesson in specific examples from the provided paradigms/transitions and linking it to the patterns identified in Step 1.
+            3. Suggest how this lesson might apply to current or future challenges/opportunities related to the topic.
 
-Only respond with the JSON object.
-"""
+            Format your response as a JSON array of lesson objects with these fields:
+            - lesson: Clear statement of the lesson
+            - explanation: Grounded explanation with historical examples and pattern links
+            - relevance_today: How it applies now or in the future
+
+            Only respond with the JSON array.
+            """
         )
         
-        self.project_future_prompt = PromptTemplate(
+        self.project_future_paradigms_prompt = PromptTemplate(
             input_variables=["topic", "paradigms", "transitions", "lessons"],
-            template="""You are projecting future paradigm possibilities for: {topic}.
+            template="""You are projecting potential future paradigms related to the topic: {topic}, based on historical context and current trends.
 
-Based on the historical paradigms:
-{paradigms}
+            Historical Paradigms:
+            {paradigms}
 
-The transitions between them:
-{transitions}
+            Paradigm Transitions:
+            {transitions}
 
-And the lessons extracted:
-{lessons}
+            Historical Lessons:
+            {lessons}
 
-Your task is to project possible future paradigms that might emerge next. For each future paradigm possibility:
-1. Provide a clear name
-2. Write a detailed description of what this paradigm might entail
-3. Explain the conditions that would need to be true for this paradigm to emerge
-4. Identify early indicators that might suggest this paradigm is emerging
-5. Estimate a rough timeline for when this paradigm might become dominant
+            **Step 1: Reflect on Current Drivers and Disruptors**
+            Consider the current state of '{topic}', the historical lessons learned, and emerging trends (technological, economic, social, etc.). What are the most significant forces, tensions, or potential disruptions that could lead to a new paradigm shift? How might the core drivers/constraints evolve?
 
-Format your response as a JSON array of future paradigm objects with these fields:
-- name: Name of the potential future paradigm
-- description: Detailed description
-- emergence_conditions: Conditions that would need to be true
-- early_indicators: Early indicators that might suggest emergence
-- estimated_timeline: Rough timeline (e.g., "Next 5-10 years", "2030s-2040s")
+            **Step 2: Project Future Paradigms**
+            Based on your reflection, project 2-4 plausible future paradigms for '{topic}'. These should represent distinct potential futures based on the drivers/disruptors identified.
+            For each projected paradigm:
+            1. Provide a speculative but descriptive name.
+            2. Describe the core assumptions and characteristics of this potential future paradigm, linking it to the drivers/disruptors from Step 1.
+            3. Explain what key developments or events would need to occur for this paradigm to emerge.
+            4. Discuss potential implications or consequences if this paradigm became dominant.
+            5. Suggest search terms to explore emerging signals or research related to this potential future.
 
-Only respond with the JSON array. Include at least 3 different possible future paradigms.
-"""
+            Format your response as a JSON array of future paradigm objects with these fields:
+            - name: Speculative name of the future paradigm
+            - description: Core assumptions/characteristics linked to drivers/disruptors
+            - emergence_conditions: Key developments needed for it to arise
+            - potential_implications: Consequences if dominant
+            - search_terms: Terms to explore emerging signals
+
+            Only respond with the JSON array.
+            """
         )
     
     async def identify_historical_paradigms(self, topic: str) -> List[Dict[str, Any]]:
         """
-        Identify historical paradigms related to a topic.
+        Identify historical paradigms related to a topic, reflecting on core drivers first.
         
         Args:
             topic: Topic to analyze
@@ -231,6 +245,7 @@ Only respond with the JSON array. Include at least 3 different possible future p
             )
             
             # Run the chain
+            logger.info(f"Identifying historical paradigms for topic: {topic} with core driver reflection...")
             response = await chain.arun(
                 topic=topic,
                 min_paradigms=self.min_paradigms
@@ -243,29 +258,26 @@ Only respond with the JSON array. Include at least 3 different possible future p
             return paradigms
             
         except Exception as e:
-            logger.error(f"Error identifying paradigms for {topic}: {e}")
-            raise ParadigmAnalysisError(f"Failed to identify paradigms: {e}")
+            logger.error(f"Error identifying historical paradigms for {topic}: {e}")
+            raise ParadigmAnalysisError(f"Failed to identify historical paradigms: {e}")
     
-    async def analyze_paradigm_transitions(
-        self, 
-        paradigms: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    async def analyze_paradigm_transitions(self, paradigms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Analyze transitions between paradigms.
+        Analyze transitions between paradigms, reflecting on dynamics first.
         
         Args:
-            paradigms: List of paradigm dictionaries in chronological order
+            paradigms: List of paradigm dictionaries
             
         Returns:
             List of transition dictionaries
         """
+        if len(paradigms) < 2:
+            logger.info("Not enough paradigms to analyze transitions.")
+            return []
+        
         try:
             # Format paradigms for prompt
-            paradigms_text = ""
-            for i, paradigm in enumerate(paradigms, 1):
-                paradigms_text += f"{i}. {paradigm.get('name', 'Unknown Paradigm')} ({paradigm.get('time_period', 'Unknown Period')}): "
-                paradigms_text += f"{paradigm.get('description', 'No description')}\n"
-                paradigms_text += f"   Key characteristics: {', '.join(paradigm.get('key_characteristics', []))}\n\n"
+            paradigms_text = json.dumps(paradigms, indent=2)
             
             # Create chain for transition analysis
             chain = LLMChain(
@@ -274,14 +286,13 @@ Only respond with the JSON array. Include at least 3 different possible future p
             )
             
             # Run the chain
-            response = await chain.arun(
-                paradigms=paradigms_text
-            )
+            logger.info(f"Analyzing transitions between {len(paradigms)} paradigms with dynamics reflection...")
+            response = await chain.arun(paradigms=paradigms_text)
             
             # Parse JSON response
             transitions = json.loads(response)
             
-            logger.info(f"Analyzed {len(transitions)} paradigm transitions")
+            logger.info(f"Analyzed {len(transitions)} paradigm transitions.")
             return transitions
             
         except Exception as e:
@@ -292,31 +303,21 @@ Only respond with the JSON array. Include at least 3 different possible future p
         self,
         paradigms: List[Dict[str, Any]],
         transitions: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    ) -> List[Dict[str, Any]]:
         """
-        Extract lessons and patterns from historical paradigm shifts.
+        Extract lessons from historical shifts, reflecting on patterns first.
         
         Args:
             paradigms: List of paradigm dictionaries
             transitions: List of transition dictionaries
             
         Returns:
-            Dictionary with extracted lessons and patterns
+            List of lesson dictionaries
         """
         try:
-            # Format paradigms for prompt
-            paradigms_text = ""
-            for i, paradigm in enumerate(paradigms, 1):
-                paradigms_text += f"{i}. {paradigm.get('name', 'Unknown Paradigm')} ({paradigm.get('time_period', 'Unknown Period')}): "
-                paradigms_text += f"{paradigm.get('description', 'No description')}\n"
-            
-            # Format transitions for prompt
-            transitions_text = ""
-            for i, transition in enumerate(transitions, 1):
-                transitions_text += f"{i}. From {transition.get('from_paradigm', 'Unknown')} to {transition.get('to_paradigm', 'Unknown')}:\n"
-                transitions_text += f"   Factors: {', '.join(transition.get('factors', []))}\n"
-                transitions_text += f"   Key innovations: {', '.join(transition.get('key_innovations', []))}\n"
-                transitions_text += f"   Resistance: {transition.get('resistance', 'Unknown')}\n\n"
+            # Format paradigms and transitions for prompt
+            paradigms_text = json.dumps(paradigms, indent=2)
+            transitions_text = json.dumps(transitions, indent=2)
             
             # Create chain for lesson extraction
             chain = LLMChain(
@@ -325,6 +326,7 @@ Only respond with the JSON array. Include at least 3 different possible future p
             )
             
             # Run the chain
+            logger.info("Extracting historical lessons with pattern reflection...")
             response = await chain.arun(
                 paradigms=paradigms_text,
                 transitions=transitions_text
@@ -333,7 +335,7 @@ Only respond with the JSON array. Include at least 3 different possible future p
             # Parse JSON response
             lessons = json.loads(response)
             
-            logger.info(f"Extracted lessons from historical paradigm shifts")
+            logger.info(f"Extracted {len(lessons)} historical lessons.")
             return lessons
             
         except Exception as e:
@@ -345,47 +347,34 @@ Only respond with the JSON array. Include at least 3 different possible future p
         topic: str,
         paradigms: List[Dict[str, Any]],
         transitions: List[Dict[str, Any]],
-        lessons: Dict[str, Any]
+        lessons: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Project possible future paradigms.
+        Project future paradigms, reflecting on current drivers first.
         
         Args:
-            topic: Topic to analyze
-            paradigms: List of paradigm dictionaries
+            topic: Topic being analyzed
+            paradigms: List of historical paradigm dictionaries
             transitions: List of transition dictionaries
-            lessons: Dictionary with extracted lessons
+            lessons: List of lesson dictionaries
             
         Returns:
-            List of future paradigm dictionaries
+            List of future paradigm projection dictionaries
         """
         try:
-            # Format paradigms for prompt
-            paradigms_text = ""
-            for i, paradigm in enumerate(paradigms, 1):
-                paradigms_text += f"{i}. {paradigm.get('name', 'Unknown Paradigm')} ({paradigm.get('time_period', 'Unknown Period')}): "
-                paradigms_text += f"{paradigm.get('description', 'No description')}\n"
-            
-            # Format transitions for prompt
-            transitions_text = ""
-            for i, transition in enumerate(transitions, 1):
-                transitions_text += f"{i}. From {transition.get('from_paradigm', 'Unknown')} to {transition.get('to_paradigm', 'Unknown')}:\n"
-                transitions_text += f"   Factors: {', '.join(transition.get('factors', []))}\n"
-                transitions_text += f"   Key innovations: {', '.join(transition.get('key_innovations', []))}\n"
-            
-            # Format lessons for prompt
-            lessons_text = ""
-            lessons_text += f"Evolution patterns: {', '.join(lessons.get('evolution_patterns', []))}\n"
-            lessons_text += f"Shift factors: {', '.join(lessons.get('shift_factors', []))}\n"
-            lessons_text += f"End indicators: {', '.join(lessons.get('end_indicators', []))}\n"
+            # Format inputs for prompt
+            paradigms_text = json.dumps(paradigms, indent=2)
+            transitions_text = json.dumps(transitions, indent=2)
+            lessons_text = json.dumps(lessons, indent=2)
             
             # Create chain for future projection
             chain = LLMChain(
                 llm=self.llm,
-                prompt=self.project_future_prompt
+                prompt=self.project_future_paradigms_prompt
             )
             
             # Run the chain
+            logger.info(f"Projecting future paradigms for {topic} with driver/disruptor reflection...")
             response = await chain.arun(
                 topic=topic,
                 paradigms=paradigms_text,
@@ -396,7 +385,7 @@ Only respond with the JSON array. Include at least 3 different possible future p
             # Parse JSON response
             future_paradigms = json.loads(response)
             
-            logger.info(f"Projected {len(future_paradigms)} possible future paradigms for {topic}")
+            logger.info(f"Projected {len(future_paradigms)} future paradigms for {topic}.")
             return future_paradigms
             
         except Exception as e:
@@ -412,8 +401,8 @@ Only respond with the JSON array. Include at least 3 different possible future p
         Find authoritative sources for a paradigm.
         
         Args:
-            paradigm: Paradigm dictionary with search_terms
-            count: Number of sources to find per search term
+            paradigm: Paradigm dictionary 
+            count: Number of sources to find
             
         Returns:
             List of source dictionaries
@@ -430,7 +419,7 @@ Only respond with the JSON array. Include at least 3 different possible future p
             try:
                 # Search for sources
                 query = f"{term} {paradigm.get('name', '')} history"
-                supporting, _ = self.source_validator.find_supporting_contradicting_sources(
+                supporting, _ = await self.source_validator.find_supporting_contradicting_sources(
                     query, count=count
                 )
                 

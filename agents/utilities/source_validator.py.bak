@@ -92,7 +92,7 @@ class RateLimiter:
         current_rate = len(self.call_timestamps)
         if current_rate >= self.max_calls_per_second:
             # Calculate wait time
-            earliest_timestamp = self.call_timestamps[0] if self.call_timestamps else now - 1
+            earliest_timestamp = min(self.call_timestamps)
             wait_time = 1.0 - (now - earliest_timestamp) + self.buffer_time
             if wait_time > 0:
                 logger.debug(f"Rate limit reached, waiting {wait_time:.2f} seconds")
@@ -127,7 +127,7 @@ class SourceValidator:
         blacklist_path: Optional[str] = None,
         cache_dir: Optional[str] = None,
         brave_api_key: Optional[str] = None,
-        max_brave_calls_per_second: int = 2  # More conservative rate limit based on testing
+        max_brave_calls_per_second: int = 20
     ):
         """
         Initialize the source validator.
@@ -136,7 +136,7 @@ class SourceValidator:
             blacklist_path: Path to JSON file containing blacklisted domains
             cache_dir: Directory to cache validation results
             brave_api_key: API key for Brave Search (for enhanced validation)
-            max_brave_calls_per_second: Maximum Brave API calls per second (default: 2 - conservative rate)
+            max_brave_calls_per_second: Maximum Brave API calls per second (default: 20 for Premium plan)
         """
         self.brave_api_key = brave_api_key or os.environ.get("BRAVE_API_KEY")
         
@@ -328,33 +328,19 @@ class SourceValidator:
         Returns:
             Score from 0-10 where 10 is highest credibility
         """
-        # Check if blacklisted
-        if self.is_blacklisted(url):
-            return 0
-            
-        # Parse domain
-        parsed = urlparse(url)
-        domain = parsed.netloc or parsed.path
-        domain = re.sub(r'^www\.', '', domain)
+        tier = self.get_domain_tier(url)
         
-        # Check domain tiers
-        if any(domain.endswith(f".{suffix}") for suffix in self.credibility_tiers["academic"]):
-            return 10
-            
-        # Check high credibility sources
-        if any(domain.endswith(trusted_domain) for trusted_domain in self.credibility_tiers["high"]):
-            return 9
-            
-        # Check news sources
-        if any(domain.endswith(trusted_domain) for trusted_domain in self.credibility_tiers["news"]):
-            return 8
-            
-        # Check medium credibility sources
-        if any(domain.endswith(trusted_domain) for trusted_domain in self.credibility_tiers["medium"]):
-            return 6
-            
-        # Default to medium-low credibility
-        return 5
+        # Map tiers to scores
+        tier_scores = {
+            "academic": 10,
+            "high": 9,
+            "news": 8,
+            "medium": 6,
+            "low": 4,
+            "untrusted": 0
+        }
+        
+        return tier_scores.get(tier, 5)
     
     def validate_source(self, source: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -365,28 +351,212 @@ class SourceValidator:
             
         Returns:
             Enriched source with validation data
+            
+        Raises:
+            SourceValidationError: If source is invalid or fails validation
         """
         url = source.get('url')
         if not url:
-            return source
+            raise SourceValidationError("Source missing URL")
         
-        # Get credibility score
-        score = self.get_credibility_score(url)
+        # Check if blacklisted
+        if self.is_blacklisted(url):
+            raise SourceValidationError(f"Source domain is blacklisted: {url}")
         
-        # Parse domain
+        # Get basic domain info
         parsed = urlparse(url)
         domain = parsed.netloc or parsed.path
+        domain = re.sub(r'^www\.', '', domain)
         
-        # Add validation data
-        source['validation'] = {
-            'domain': domain,
-            'credibility_score': score,
-            'blacklisted': self.is_blacklisted(url),
-            'validated_at': datetime.now().isoformat()
+        # Get credibility info
+        tier = self.get_domain_tier(url)
+        score = self.get_credibility_score(url)
+        
+        # Try to determine publication date
+        pub_date = source.get('date')
+        
+        # Enrich source with validation data
+        enriched = {
+            **source,
+            'validation': {
+                'domain': domain,
+                'credibility_tier': tier,
+                'credibility_score': score,
+                'blacklisted': False,
+                'publication_date': pub_date,
+                'validated_at': datetime.now().isoformat()
+            }
         }
         
-        return source
+        return enriched
     
+    async def find_supporting_contradicting_sources(
+        self, 
+        claim: str, 
+        count: int = 3
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Find sources that support or contradict a claim.
+        
+        Args:
+            claim: Claim to search for
+            count: Number of sources to find of each type
+            
+        Returns:
+            Tuple of (supporting_sources, contradicting_sources)
+        """
+        # Use more targeted search queries
+        supporting_query = f"evidence supporting {claim}"
+        contradicting_query = f"evidence against {claim}"
+        
+        supporting = []
+        contradicting = []
+        
+        if not self.brave_api_key:
+            logger.warning("Brave API key not available. Using mock data.")
+            # Return mock data
+            mock_supporting = [
+                {
+                    'title': f'Supporting source for "{claim[:30]}..." #{i}',
+                    'url': f'https://example.com/supporting{i}',
+                    'description': f'This is a mock supporting source #{i} for claim: {claim[:50]}...',
+                    'source': 'Mock Supporting Source',
+                    'date': datetime.now().isoformat()
+                } for i in range(1, count + 1)
+            ]
+            
+            mock_contradicting = [
+                {
+                    'title': f'Contradicting source for "{claim[:30]}..." #{i}',
+                    'url': f'https://example.com/contradicting{i}',
+                    'description': f'This is a mock contradicting source #{i} for claim: {claim[:50]}...',
+                    'source': 'Mock Contradicting Source',
+                    'date': datetime.now().isoformat()
+                } for i in range(1, count + 1)
+            ]
+            
+            return mock_supporting, mock_contradicting
+        
+        max_retries = 3
+
+        try:
+            # Fetch supporting sources
+            headers = {
+                'Accept': 'application/json',
+                'X-Subscription-Token': self.brave_api_key
+            }
+            
+            for query, results_list in [
+                (supporting_query, supporting),
+                (contradicting_query, contradicting)
+            ]:
+                # Check if we need to make this call
+                # Skip if we already have enough high-quality results
+                if len(results_list) >= count:
+                    continue
+                
+                retry_count = 0
+                while retry_count < max_retries:
+                    try:
+                        params = {
+                            'q': query,
+                            'count': count * 2,  # Request more to filter blacklisted
+                            'search_lang': 'en'
+                        }
+                        
+                        # Apply rate limiting
+                        await self.rate_limiter.wait_if_needed()
+                        
+                        response = requests.get(
+                            'https://api.search.brave.com/res/v1/web/search',
+                            headers=headers,
+                            params=params
+                        )
+                        
+                        if response.status_code == 429:
+                            # Rate limit hit
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                wait_time = (2 ** retry_count) * 2  # Exponential backoff
+                                logger.warning(f"Brave API rate limit hit, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries})")
+                                await asyncio.sleep(wait_time)
+                                continue
+                            else:
+                                logger.error(f"Brave API rate limit exceeded after {max_retries} retries")
+                                # Create fallback results since we can't get real ones
+                                if 'supporting' in query:
+                                    # Add fallback supporting sources
+                                    for i in range(1, count + 1):
+                                        results_list.append({
+                                            'title': f'Rate-limited fallback supporting source #{i}',
+                                            'url': f'https://example.com/supporting{i}',
+                                            'description': f'This is a fallback supporting source due to rate limit: {claim[:50]}...',
+                                            'source': 'Rate-Limited Fallback',
+                                            'date': datetime.now().isoformat()
+                                        })
+                                else:
+                                    # Add fallback contradicting sources
+                                    for i in range(1, count + 1):
+                                        results_list.append({
+                                            'title': f'Rate-limited fallback contradicting source #{i}',
+                                            'url': f'https://example.com/contradicting{i}',
+                                            'description': f'This is a fallback contradicting source due to rate limit: {claim[:50]}...',
+                                            'source': 'Rate-Limited Fallback',
+                                            'date': datetime.now().isoformat()
+                                        })
+                                # Break out of retry loop
+                                break
+                        
+                        elif response.status_code != 200:
+                            logger.error(f"Error searching Brave API: {response.status_code} - {response.text}")
+                            raise SourceValidationError(f"Brave Search API error: {response.status_code}")
+                        
+                        results = response.json().get('web', {}).get('results', [])
+                        
+                        # Process results
+                        for result in results:
+                            url = result.get('url')
+                            
+                            # Skip blacklisted sources
+                            if self.is_blacklisted(url):
+                                continue
+                            
+                            source = {
+                                'title': result.get('title'),
+                                'url': url,
+                                'description': result.get('description'),
+                                'source': result.get('extra_snippets', {}).get('source', 'Unknown Source'),
+                                'date': datetime.now().isoformat()
+                            }
+                            
+                            # Add validation data
+                            source = self.validate_source(source)
+                            results_list.append(source)
+                            
+                            # Stop when we have enough
+                            if len(results_list) >= count:
+                                break
+                        
+                        # Successfully got results, break out of retry loop
+                        break
+                    
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            wait_time = (2 ** retry_count) * 2  # Exponential backoff
+                            logger.warning(f"Error in searching for sources, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries})")
+                            await asyncio.sleep(wait_time)
+                        else:
+                            logger.error(f"Failed to find sources after {max_retries} retries: {e}")
+                            raise SourceValidationError(f"Failed to find sources: {e}")
+            
+            # Return consolidated results
+            return supporting, contradicting
+            
+        except Exception as e:
+            logger.error(f"Error finding supporting/contradicting sources: {e}")
+            raise SourceValidationError(f"Failed to find sources: {e}")
+
     async def search_web(self, query: str, count: int = 5) -> List[Dict[str, Any]]:
         """
         Search the web for a query using Brave Search API.
@@ -438,7 +608,7 @@ class SourceValidator:
                     'search_lang': 'en'
                 }
                 
-                # Apply rate limiting - use the async version
+                # Apply rate limiting - now use the async version
                 await self.rate_limiter.wait_if_needed()
                 
                 # Add a small delay based on retry count (much shorter for Premium plan)
@@ -455,17 +625,16 @@ class SourceValidator:
                 
                 if response.status_code == 429:
                     # Rate limit hit - unusual for Premium plan but still possible
+                    self.rate_limiter.record_rate_limit_error()  # Record the error for adaptive rate limiting
                     retry_count += 1
-                    # Record for adaptive rate limiting
-                    self.rate_limiter.record_rate_limit_error()
                     if retry_count < max_retries:
                         # Less steep backoff for Premium plan
                         wait_time = 0.5 + (retry_count * 0.5)  # Start with 1s, then 1.5s, 2s, 2.5s
-                        logger.warning(f"Brave API rate limit hit, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries})")
+                        logger.warning(f"Brave API rate limit hit, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries}) - this is unusual for Premium plan")
                         await asyncio.sleep(wait_time)
                         continue
                     else:
-                        logger.error(f"Brave API rate limit exceeded after {max_retries} retries")
+                        logger.error(f"Brave API rate limit exceeded after {max_retries} retries - check if your Premium plan key is valid")
                         # Fall back to mock results when rate limit persists
                         mock_results = [
                             {
@@ -548,31 +717,6 @@ class SourceValidator:
                     self.search_cache[cache_key] = mock_results
                     return mock_results
     
-    async def find_supporting_contradicting_sources(
-        self, 
-        claim: str, 
-        count: int = 3
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """
-        Find sources that support or contradict a claim.
-        
-        Args:
-            claim: Claim to search for
-            count: Number of sources to find of each type
-            
-        Returns:
-            Tuple of (supporting_sources, contradicting_sources)
-        """
-        # Create search queries
-        supporting_query = f"evidence supporting {claim}"
-        contradicting_query = f"evidence against {claim}"
-        
-        # Search for supporting and contradicting sources
-        supporting_results = await self.search_web(supporting_query, count)
-        contradicting_results = await self.search_web(contradicting_query, count)
-        
-        return supporting_results, contradicting_results
-    
     def calculate_consensus_score(
         self,
         supporting_sources: List[Dict[str, Any]],
@@ -605,14 +749,20 @@ class SourceValidator:
             for source in contradicting_sources
         )
         
-        total_score = supporting_score + contradicting_score
-        if total_score == 0:
+        # Calculate total possible score
+        total_sources = len(supporting_sources) + len(contradicting_sources)
+        max_possible = total_sources * 10  # If all sources had max credibility
+        
+        if max_possible == 0:
             return 5  # Avoid division by zero
         
-        # Calculate percentage supporting (0 to 1)
-        supporting_percentage = supporting_score / total_score
+        # Calculate percentage supporting
+        supporting_percentage = supporting_score / (supporting_score + contradicting_score)
         
-        # Map to 1-10 scale
-        consensus_score = int(1 + supporting_percentage * 9)
+        # Map percentage to 1-10 scale
+        # 0% supporting -> 1
+        # 50% supporting -> 5
+        # 100% supporting -> 10
+        consensus_score = round(1 + supporting_percentage * 9)
         
         return consensus_score 

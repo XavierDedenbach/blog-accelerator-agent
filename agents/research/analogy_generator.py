@@ -464,7 +464,33 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             query = f"{analogy.get('domain', '')} {analogy.get('title', '')} visual diagram illustration"
             
             # Use FirecrawlClient to find visual assets
-            visual_assets = await self.firecrawl_client.search_images(query)
+            visual_assets = []
+            try:
+                if self.firecrawl_client:
+                    visual_assets = await self.firecrawl_client.search_images(query)
+                
+                # If no images found with Firecrawl, try Brave API if available
+                if not visual_assets and self.source_validator:
+                    logger.info(f"Falling back to Brave API for images for analogy: {analogy.get('title', 'Untitled')}")
+                    try:
+                        # Use search_web directly and await the result
+                        search_results = await self.source_validator.search_web(f"{query} image", count=5)
+                        # Format results as visual assets
+                        visual_assets = [
+                            {
+                                "url": result.get("url", ""),
+                                "title": result.get("title", ""),
+                                "description": result.get("description", ""),
+                                "source": result.get("source", "Brave Search")
+                            }
+                            for result in search_results
+                        ]
+                    except Exception as e:
+                        logger.error(f"Error searching for images with Brave API: {e}")
+                        visual_assets = []
+            except Exception as e:
+                logger.error(f"Error searching for images: {e}")
+                visual_assets = []
             
             if not visual_assets:
                 logger.warning(f"No visual assets found for analogy: {analogy.get('title', 'Untitled')}")

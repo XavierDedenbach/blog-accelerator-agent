@@ -178,6 +178,7 @@ CMD ["python", "main.py"]
 
 * Topic intake and validation
 * Hierarchical topic decomposition
+* **Sequential thinking methodology** for deeper analysis with nuance
 * Industry analysis (10+ critical challenges with sources)
 * Solution evaluation (5-10 pro arguments, 5-10 counter arguments)
 * Current paradigm assessment (historical context, 2-3 alternatives)
@@ -185,6 +186,22 @@ CMD ["python", "main.py"]
 * Visual asset collection (50-100 relevant visuals)
 * Analogy generation (3 per category)
 * Readiness scoring (letter grade A-F)
+
+### Research Mode Features
+
+*   Exhaustive topic breakdown:
+    *   Industry/System Analysis (Challenges, Components, Sources)
+        *   **Enhanced depth:** Analysis includes reflection on core constraints and nuances (e.g., team size, resource limits) before identifying challenges or evaluating components.
+        *   **Sequential thinking:** First identifying constraints, then systemic context, then stakeholder perspectives before challenge identification.
+    *   Solution Analysis (Pros, Cons, Metrics, Sources)
+        *   **Sequential approach:** Considers implementation complexity and adoption barriers before evaluating effectiveness.
+    *   Paradigm Analysis (Historical Shifts, Lessons, Future Projections, Sources)
+        *   **Sequential analysis:** Examines paradigm evolution and historical context before assessing effectiveness.
+    *   Audience Analysis (Segments, Needs, Knowledge, Strategies)
+*   Extensive data gathering with authoritative sources
+*   Visual asset collection (related images, videos, infographics)
+*   Analogy generation and evaluation
+*   Comprehensive research documentation output
 
 ### Review Mode (Enhanced)
 
@@ -208,6 +225,18 @@ CMD ["python", "main.py"]
   * Comprehensive grammar check
   * Inline suggestion format
   * Categorized fixes (confidence, clarity, grammar)
+
+### Research Report Web Viewer
+
+* **Auto-opening browser view** of research results
+* Clean, responsive UI for reading comprehensive research reports
+* Collapsible sections for easy navigation of lengthy content
+* Visual indicators for readiness scores
+* Embedded media viewer for visual assets
+* Search and filter capabilities for large reports
+* Shareable URLs for team collaboration
+
+This feature enhances usability by automatically opening completed research in a browser tab for immediate review, rather than requiring users to navigate MongoDB directly.
 
 ---
 

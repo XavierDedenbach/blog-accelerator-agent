@@ -117,6 +117,21 @@ Includes a reference to an asset folder containing the markdown file and any ima
 * LangGraph orchestrates task sequences (research → write → evaluate)
 * Each agent writes logs to Opik MCP
 * Sub-agents share context using shared memory via LangChain (e.g., VectorStore or Mongo)
+* **Prompting Strategy:** Research agents employ sequential reflection within prompts, asking the LLM to consider core constraints before generating analysis to enhance nuance and depth.
+
+### Sequential Thinking Implementation
+
+* **Prompt Structure:** Each analysis prompt follows a stepwise structure:
+  1. Identify core constraints relevant to the topic
+  2. Consider systemic context
+  3. Map stakeholder perspectives
+  4. Identify challenges/solutions
+  5. Generate supporting evidence
+  6. Test counter-arguments
+
+* **Agent Coordination:** Each analyzer (Industry, Solution, Paradigm) first runs constraint analysis before proceeding to main task
+* **Memory Mechanism:** Constraints identified are stored and referenced in subsequent analysis
+* **Enhanced MongoDB Schema:** Includes fields for storing constraint analysis alongside each research component
 
 ### Agent → Mongo
 
@@ -181,6 +196,27 @@ Includes a reference to an asset folder containing the markdown file and any ima
 * All agent interactions are logged to **Opik MCP**
 * Each stage writes an execution trace
 * Metadata about file status, versioning, and validation is stored in MongoDB and mirrored in Opik
+
+---
+
+## Web UI for Research Reports
+
+* **Server-Side Rendering**: Simple HTML/template-based UI rendering
+* **Auto-Launch**: Browser tab opens automatically when research completes
+* **Data Flow**:
+  1. Python web server endpoint serves HTML/CSS/JS
+  2. Client-side JS loads report data via REST API
+  3. Data is formatted and displayed with proper styling
+* **Implementation Options**:
+  * FastAPI serving Jinja templates (recommended)
+  * Simple Flask app for report viewing only
+  * Static HTML with JavaScript for API calls
+* **Browser Integration**:
+  * Use `webbrowser` Python module to open URL
+  * Fallback to displaying URL if browser launch fails
+* **Security Considerations**:
+  * Local-only by default (localhost)
+  * Optional basic auth for team sharing
 
 ---
 

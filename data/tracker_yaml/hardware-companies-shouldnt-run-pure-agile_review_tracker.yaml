@@ -7,16 +7,16 @@ review_pipeline:
     result_file: hardware-companies-shouldnt-run-pure-agile_factual_review_v1.md
     timestamp: '2025-05-03T03:18:00.290229+00:00'
   style_review:
-    complete: false
-    completed_by: null
-    result_file: null
-    timestamp: null
+    complete: true
+    completed_by: reviewer_agent
+    result_file: hardware-companies-shouldnt-run-pure-agile_style_review_v1.md
+    timestamp: '2025-05-04T00:03:42.786681+00:00'
   grammar_review:
-    complete: false
-    completed_by: null
-    result_file: null
-    timestamp: null
+    complete: true
+    completed_by: reviewer_agent
+    result_file: hardware-companies-shouldnt-run-pure-agile_grammar_review_v1.md
+    timestamp: '2025-05-04T00:03:50.991748+00:00'
 final_release:
-  complete: false
-  released_by: null
-  timestamp: null
+  complete: true
+  released_by: reviewer_agent
+  timestamp: '2025-05-04T00:04:04.256027+00:00'

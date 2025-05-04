@@ -48,9 +48,17 @@ The app is **CLI or API-driven**, not a GUI. All user interactions happen by:
   * Current dominant paradigm
   * Audience assumptions
 
+* For each analysis component, the agent applies **sequential thinking**:
+  1. First identifies core constraints and limitations
+  2. Considers systemic context
+  3. Maps stakeholder perspectives
+  4. Only then identifies challenges or evaluates solutions
+  5. This ensures deeper analysis with greater nuance
+
 **Agent → Agent**
 
 * Internal agent chain splits the topic and creates question trees.
+* Each analyzer applies sequential thinking before generating output.
 
 ---
 
@@ -60,27 +68,31 @@ The app is **CLI or API-driven**, not a GUI. All user interactions happen by:
 
   1. **Industry Affected**
 
-     * Identify top 3–5 systemic challenges
+     * Apply sequential thinking to understand constraints first
+     * Identify top 10+ systemic challenges
      * Retrieve sources
+     * Analyze challenge components (risk/slowdown/cost/inefficiency factors)
      * Log URLs and quotes
   2. **Proposed Solution**
 
+     * Apply sequential thinking to understand solution constraints first
      * Describe how the solution addresses each challenge
+     * Identify 5-10 pro arguments and 5-10 counter arguments
      * Gather metrics and progress data
      * Collect 50–100 visual assets (via Firecrawl MCP)
-     * List weaknesses and counterpoints
   3. **Dominant Paradigm**
 
+     * Apply sequential thinking to understand paradigm evolution first
      * Show how the existing system works
      * When it was established
-     * Collect visual examples
+     * Collect 10-20 visual examples
      * Compare to 2–3 alternative solutions
   4. **Audience Fit**
 
      * Identify knowledge gaps
      * List acronyms + definitions
      * Recommend cuts or added context
-     * Generate analogies
+     * Generate 3 analogies for challenges and 3 for solutions
 
 **Agent → Firecrawl MCP**
 
@@ -93,6 +105,7 @@ The app is **CLI or API-driven**, not a GUI. All user interactions happen by:
 **Agent → Agent**
 
 * Various internal steps call sub-agents for citation verification, content summarization, image filtering.
+* Sequential thinking is coordinated across agent interactions.
 
 ---
 
@@ -322,6 +335,7 @@ final_release:
 ## Notes on Agent Coordination
 
 * **Agent orchestration** is powered by LangGraph (LangChain)
+* **Sequential thinking** is implemented through structured prompting and multi-step reasoning
 * **Web search**: Brave MCP with Firecrawl fallback
 * **Citation filtering**: blacklist-aware agent
 * **Memory and review**: MongoDB context across tasks

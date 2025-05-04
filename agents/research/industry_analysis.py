@@ -103,62 +103,76 @@ class IndustryAnalyzer:
         self.identify_challenges_prompt = PromptTemplate(
             input_variables=["topic", "min_challenges"],
             template="""You are analyzing the industry or system affected by the topic: {topic}.
-            
-Your task is to identify at least {min_challenges} critical challenges facing this industry or system. 
-Focus on challenges that are:
-1. Significant and impactful to the industry
-2. Measurable or observable
-3. Relevant to the topic
-4. Diverse in nature (technical, economic, social, regulatory, etc.)
-5. Specific rather than general
+            Assume the context often involves small, resource-constrained teams (like hardware startups) facing these challenges.
 
-For each challenge:
-1. Provide a clear name
-2. Write a detailed description (2-3 sentences)
-3. Explain why this is a critical challenge
-4. Suggest search terms to find authoritative sources about this challenge
+            **Step 1: Reflect on Core Constraints**
+            Before identifying challenges, briefly consider the inherent difficulties and constraints related to '{topic}', especially for smaller players. Think about factors like:
+            - Resource limitations (funding, personnel)
+            - Interdisciplinary complexity
+            - Physical vs. digital constraints (if applicable)
+            - Long development cycles or high iteration costs
+            - Supply chain dependencies
+            - Regulatory hurdles
 
-Format your response as a JSON array of challenge objects with these fields:
-- name: Name of the challenge
-- description: Detailed description
-- criticality: Why this is a critical challenge
-- search_terms: Array of search terms to find sources
+            **Step 2: Identify Critical Challenges**
+            Based on your reflection and the topic '{topic}', identify at least {min_challenges} critical challenges facing the relevant industry or system. Focus on challenges that are:
+            1. Significant and impactful, exacerbated by the constraints identified in Step 1
+            2. Measurable or observable
+            3. Relevant to the topic
+            4. Diverse in nature (technical, economic, operational, regulatory, etc.)
+            5. Specific rather than general
 
-Only respond with the JSON array. Include at least {min_challenges} challenges.
-"""
+            For each challenge:
+            1. Provide a clear name
+            2. Write a detailed description (2-3 sentences), explaining *why* it's a challenge, linking back to the core constraints where possible.
+            3. Explain why this is a *critical* challenge in this context.
+            4. Suggest search terms to find authoritative sources about this challenge, considering the nuances discussed.
+
+            Format your response as a JSON array of challenge objects with these fields:
+            - name: Name of the challenge
+            - description: Detailed description linking to constraints
+            - criticality: Explanation of why it's critical in context
+            - search_terms: Array of nuanced search terms
+
+            Only respond with the JSON array.
+            """
         )
         
         self.analyze_challenge_component_prompt = PromptTemplate(
             input_variables=["challenge", "description", "sources"],
-            template="""You are deeply analyzing a critical challenge in an industry or system.
+            template="""You are analyzing the core components of a specific industry challenge, considering the context of resource-constrained teams.
 
-Challenge: {challenge}
-Description: {description}
+            Challenge Name: {challenge}
+            Description: {description}
 
-Below are sources with information about this challenge:
-{sources}
+            Below are sources with information about this challenge:
+            {sources}
 
-Based on this information, provide a comprehensive analysis of the core components that make this challenge:
-1. Risky: What specific risks does this challenge pose?
-2. Slow: What aspects cause delays or inefficiencies?
-3. Expensive: What cost factors are involved?
-4. Inefficient: What specific inefficiencies exist?
+            **Step 1: Reflect on Constraints**
+            Briefly reconsider the core constraints (e.g., small teams, limited funding, hardware complexities) and how they specifically impact the challenge '{challenge}'.
 
-For each component, cite specific evidence from the sources provided.
+            **Step 2: Analyze Components**
+            Based on the sources provided AND your reflection on constraints, provide a comprehensive analysis of the core components that make this challenge:
+            1. Risky: What specific risks does this challenge pose, amplified by the constraints?
+            2. Slow: What aspects cause delays or inefficiencies, especially for small teams?
+            3. Expensive: What cost factors are involved, and why are they particularly burdensome?
+            4. Inefficient: What specific inefficiencies exist, and how do they stem from or interact with the constraints?
 
-Format your response as a JSON object with these keys:
-- risk_factors: Array of specific risk factors with source citations
-- slowdown_factors: Array of factors causing delays with source citations
-- cost_factors: Array of cost factors with source citations
-- inefficiency_factors: Array of specific inefficiencies with source citations
+            For each component, cite specific evidence from the sources provided where possible, but also incorporate insights derived from the constraints.
 
-Only respond with the JSON object.
-"""
+            Format your response as a JSON object with these keys:
+            - risk_factors: Array of specific risk factors (with source citations and constraint links)
+            - slowdown_factors: Array of factors causing delays (with source citations and constraint links)
+            - cost_factors: Array of cost factors (with source citations and constraint links)
+            - inefficiency_factors: Array of specific inefficiencies (with source citations and constraint links)
+
+            Only respond with the JSON object.
+            """
         )
     
     async def identify_challenges(self, topic: str) -> List[Dict[str, Any]]:
         """
-        Identify critical challenges facing an industry or system.
+        Identify critical challenges facing an industry or system, reflecting on constraints first.
         
         Args:
             topic: Topic to analyze
@@ -174,6 +188,7 @@ Only respond with the JSON object.
             )
             
             # Run the chain
+            logger.info(f"Identifying challenges for topic: {topic} with constraint reflection...")
             response = await chain.arun(
                 topic=topic,
                 min_challenges=self.min_challenges
@@ -198,8 +213,8 @@ Only respond with the JSON object.
         Find authoritative sources for a challenge.
         
         Args:
-            challenge: Challenge dictionary with search_terms
-            count: Number of sources to find per search term
+            challenge: Challenge dictionary
+            count: Number of sources to find
             
         Returns:
             List of source dictionaries
@@ -216,7 +231,7 @@ Only respond with the JSON object.
             try:
                 # Search for sources
                 query = f"{term} {challenge.get('name', '')}"
-                supporting, _ = self.source_validator.find_supporting_contradicting_sources(
+                supporting, _ = await self.source_validator.find_supporting_contradicting_sources(
                     query, count=count
                 )
                 
@@ -245,7 +260,7 @@ Only respond with the JSON object.
         sources: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Analyze the components of a challenge.
+        Analyze the components of a challenge, reflecting on constraints first.
         
         Args:
             challenge: Challenge dictionary
@@ -260,7 +275,9 @@ Only respond with the JSON object.
             for i, source in enumerate(sources, 1):
                 sources_text += f"Source {i}: {source.get('title', 'Untitled')}\n"
                 sources_text += f"URL: {source.get('url', 'No URL')}\n"
-                sources_text += f"Description: {source.get('description', 'No description')}\n\n"
+                # Limit description length if needed
+                desc = source.get('description', 'No description')
+                sources_text += f"Description: {desc[:300]}{'...' if len(desc) > 300 else ''}\n\n"
             
             # Create chain for component analysis
             chain = LLMChain(
@@ -269,6 +286,7 @@ Only respond with the JSON object.
             )
             
             # Run the chain
+            logger.info(f"Analyzing components for challenge: {challenge.get('name', '')} with constraint reflection...")
             response = await chain.arun(
                 challenge=challenge.get("name", ""),
                 description=challenge.get("description", ""),

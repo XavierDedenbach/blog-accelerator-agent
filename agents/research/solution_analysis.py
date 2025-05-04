@@ -103,7 +103,7 @@ class SolutionAnalyzer:
         """Initialize prompts for solution analysis."""
         self.pro_arguments_prompt = PromptTemplate(
             input_variables=["topic", "solution", "challenges", "min_arguments"],
-            template="""You are analyzing a proposed solution to industry challenges.
+            template="""You are analyzing a proposed solution to industry challenges, considering the context of resource-constrained teams (e.g., hardware startups).
 
 Topic: {topic}
 Proposed Solution: {solution}
@@ -111,20 +111,24 @@ Proposed Solution: {solution}
 The solution aims to address the following challenges:
 {challenges}
 
-Your task is to generate at least {min_arguments} compelling PRO arguments supporting this solution.
+**Step 1: Reflect on Context & Constraints**
+Briefly consider the challenges listed and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities) when implementing a solution like '{solution}'. How might these factors influence the potential benefits?
+
+**Step 2: Generate PRO Arguments**
+Based on your reflection, generate at least {min_arguments} compelling PRO arguments supporting this solution *in this specific context*.
 For each argument:
 1. Provide a clear name/title
-2. Write a detailed description (2-3 sentences) explaining why this is a strong argument
-3. Specify what needs to be true for this argument to be valid (prerequisites)
-4. Suggest metrics that could measure the success of this aspect of the solution
-5. Suggest search terms to find supporting evidence for this argument
+2. Write a detailed description (2-3 sentences) explaining why this is a strong argument, linking back to the constraints or challenges where relevant.
+3. Specify what needs to be true for this argument to be valid (prerequisites), considering the context.
+4. Suggest metrics that could measure the success of this aspect of the solution, relevant to the constraints.
+5. Suggest search terms to find supporting evidence for this argument, considering the nuances.
 
 Format your response as a JSON array of argument objects with these fields:
 - name: Title of the argument
-- description: Detailed description
-- prerequisites: What needs to be true for this argument to be valid
-- metrics: Array of metrics to measure success
-- search_terms: Array of search terms to find supporting evidence
+- description: Detailed description linking to context/constraints
+- prerequisites: Context-aware prerequisites
+- metrics: Array of relevant metrics
+- search_terms: Array of nuanced search terms
 
 Only respond with the JSON array. Include at least {min_arguments} arguments.
 """
@@ -132,7 +136,7 @@ Only respond with the JSON array. Include at least {min_arguments} arguments.
         
         self.counter_arguments_prompt = PromptTemplate(
             input_variables=["topic", "solution", "challenges", "min_arguments"],
-            template="""You are analyzing potential weaknesses in a proposed solution to industry challenges.
+            template="""You are analyzing potential weaknesses or counter-arguments for a proposed solution, considering the context of resource-constrained teams (e.g., hardware startups).
 
 Topic: {topic}
 Proposed Solution: {solution}
@@ -140,28 +144,32 @@ Proposed Solution: {solution}
 The solution aims to address the following challenges:
 {challenges}
 
-Your task is to generate at least {min_arguments} compelling COUNTER arguments against this solution.
-For each counter argument:
+**Step 1: Reflect on Context & Constraints**
+Briefly consider the challenges listed and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities) when implementing a solution like '{solution}'. How might these factors introduce risks or downsides?
+
+**Step 2: Generate COUNTER Arguments**
+Based on your reflection, generate at least {min_arguments} insightful COUNTER arguments or potential weaknesses of this solution *in this specific context*.
+For each argument:
 1. Provide a clear name/title
-2. Write a detailed description (2-3 sentences) explaining why this is a valid concern
-3. Specify what would need to be true for this counter argument to be valid
-4. Suggest alternative approaches that might address this concern
-5. Suggest search terms to find supporting evidence for this counter argument
+2. Write a detailed description (2-3 sentences) explaining the potential weakness or risk, linking back to the constraints or challenges where relevant.
+3. Specify what needs to be true for this counter-argument to be significant (conditions).
+4. Suggest ways this risk could potentially be mitigated, considering the constraints.
+5. Suggest search terms to find evidence supporting this counter-argument or exploring its validity.
 
 Format your response as a JSON array of argument objects with these fields:
-- name: Title of the counter argument
-- description: Detailed description
-- conditions: What would need to be true for this counter argument to be valid
-- alternatives: Array of alternative approaches
-- search_terms: Array of search terms to find supporting evidence
+- name: Title of the counter-argument
+- description: Detailed description linking to context/constraints
+- conditions: Conditions making this counter-argument significant
+- mitigation_ideas: Array of potential mitigation strategies (context-aware)
+- search_terms: Array of nuanced search terms
 
-Only respond with the JSON array. Include at least {min_arguments} counter arguments.
+Only respond with the JSON array. Include at least {min_arguments} arguments.
 """
         )
         
-        self.metrics_prompt = PromptTemplate(
+        self.identify_metrics_prompt = PromptTemplate(
             input_variables=["topic", "solution", "challenges"],
-            template="""You are identifying key metrics to measure the success of a proposed solution.
+            template="""You are identifying key metrics to measure the progress and success of a proposed solution, considering the context of resource-constrained teams.
 
 Topic: {topic}
 Proposed Solution: {solution}
@@ -169,27 +177,24 @@ Proposed Solution: {solution}
 The solution aims to address the following challenges:
 {challenges}
 
-Your task is to identify comprehensive metrics that could be used to measure the success of this solution.
-Focus on metrics that are:
-1. Measurable and quantifiable
-2. Relevant to the solution and challenges
-3. Diverse (covering technical, economic, social, etc. aspects)
-4. Specific rather than general
+**Step 1: Reflect on Context & Constraints**
+Briefly consider the challenges, the proposed solution, and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities). What aspects of success or failure would be most critical to track for such a team implementing this solution?
 
+**Step 2: Identify Key Metrics**
+Based on your reflection, identify a set of key metrics (aim for 5-10) that would effectively measure the progress and impact of the solution '{solution}' *in this specific context*.
 For each metric:
 1. Provide a clear name
-2. Write a detailed description of what it measures
-3. Explain why this metric is important for evaluating the solution
-4. Suggest how it could be measured or tracked
+2. Explain *why* this metric is important in the context of the challenges and constraints.
+3. Describe *how* it could be measured practically by a resource-constrained team.
+4. Suggest target ranges or indicators of success/failure where applicable.
 
 Format your response as a JSON array of metric objects with these fields:
 - name: Name of the metric
-- description: What it measures
-- importance: Why this metric is important
-- measurement: How it could be measured or tracked
-- category: Category of metric (technical, economic, social, etc.)
+- importance_context: Explanation of why it's important in context
+- measurement_method: Practical measurement approach for constrained teams
+- success_indicators: Target ranges or indicators
 
-Only respond with the JSON array. Include at least 5 metrics.
+Only respond with the JSON array.
 """
         )
     
@@ -200,37 +205,37 @@ Only respond with the JSON array. Include at least 5 metrics.
         challenges: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Generate pro arguments supporting a solution.
-        
+        Generate pro arguments for the solution, reflecting on context first.
+
         Args:
-            topic: Main topic
+            topic: Topic being analyzed
             solution: Proposed solution description
             challenges: List of challenge dictionaries
-            
+
         Returns:
             List of pro argument dictionaries
         """
         try:
             # Format challenges for prompt
-            challenges_text = ""
-            for i, challenge in enumerate(challenges, 1):
-                challenges_text += f"{i}. {challenge.get('name', 'Unknown Challenge')}: "
-                challenges_text += f"{challenge.get('description', 'No description')}\n"
-            
-            # Create chain for argument generation
+            challenges_text = "\n".join(
+                [f"- {c.get('name', '')}: {c.get('description', '')}" for c in challenges]
+            )
+
+            # Create chain for pro arguments
             chain = LLMChain(
                 llm=self.llm,
                 prompt=self.pro_arguments_prompt
             )
-            
+
             # Run the chain
+            logger.info(f"Generating pro arguments for solution: {solution} with context reflection...")
             response = await chain.arun(
                 topic=topic,
                 solution=solution,
                 challenges=challenges_text,
                 min_arguments=self.min_arguments
             )
-            
+
             # Parse JSON response
             arguments = json.loads(response)
             
@@ -248,10 +253,10 @@ Only respond with the JSON array. Include at least 5 metrics.
         challenges: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Generate counter arguments against a solution.
-        
+        Generate counter arguments for the solution, reflecting on context first.
+
         Args:
-            topic: Main topic
+            topic: Topic being analyzed
             solution: Proposed solution description
             challenges: List of challenge dictionaries
             
@@ -260,18 +265,18 @@ Only respond with the JSON array. Include at least 5 metrics.
         """
         try:
             # Format challenges for prompt
-            challenges_text = ""
-            for i, challenge in enumerate(challenges, 1):
-                challenges_text += f"{i}. {challenge.get('name', 'Unknown Challenge')}: "
-                challenges_text += f"{challenge.get('description', 'No description')}\n"
+            challenges_text = "\n".join(
+                [f"- {c.get('name', '')}: {c.get('description', '')}" for c in challenges]
+            )
             
-            # Create chain for argument generation
+            # Create chain for counter arguments
             chain = LLMChain(
                 llm=self.llm,
                 prompt=self.counter_arguments_prompt
             )
             
             # Run the chain
+            logger.info(f"Generating counter arguments for solution: {solution} with context reflection...")
             response = await chain.arun(
                 topic=topic,
                 solution=solution,
@@ -296,10 +301,10 @@ Only respond with the JSON array. Include at least 5 metrics.
         challenges: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Identify metrics for measuring solution success.
-        
+        Identify key metrics for the solution, reflecting on context first.
+
         Args:
-            topic: Main topic
+            topic: Topic being analyzed
             solution: Proposed solution description
             challenges: List of challenge dictionaries
             
@@ -308,18 +313,18 @@ Only respond with the JSON array. Include at least 5 metrics.
         """
         try:
             # Format challenges for prompt
-            challenges_text = ""
-            for i, challenge in enumerate(challenges, 1):
-                challenges_text += f"{i}. {challenge.get('name', 'Unknown Challenge')}: "
-                challenges_text += f"{challenge.get('description', 'No description')}\n"
+            challenges_text = "\n".join(
+                [f"- {c.get('name', '')}: {c.get('description', '')}" for c in challenges]
+            )
             
-            # Create chain for metric identification
+            # Create chain for identifying metrics
             chain = LLMChain(
                 llm=self.llm,
-                prompt=self.metrics_prompt
+                prompt=self.identify_metrics_prompt
             )
             
             # Run the chain
+            logger.info(f"Identifying metrics for solution: {solution} with context reflection...")
             response = await chain.arun(
                 topic=topic,
                 solution=solution,
@@ -342,11 +347,11 @@ Only respond with the JSON array. Include at least 5 metrics.
         count: int = 3
     ) -> List[Dict[str, Any]]:
         """
-        Find supporting sources for an argument.
+        Find sources that support a pro or counter argument.
         
         Args:
-            argument: Argument dictionary with search_terms
-            count: Number of sources to find per search term
+            argument: Argument dictionary
+            count: Number of sources to find
             
         Returns:
             List of source dictionaries
@@ -363,7 +368,7 @@ Only respond with the JSON array. Include at least 5 metrics.
             try:
                 # Search for sources
                 query = f"{term} {argument.get('name', '')}"
-                supporting, _ = self.source_validator.find_supporting_contradicting_sources(
+                supporting, _ = await self.source_validator.find_supporting_contradicting_sources(
                     query, count=count
                 )
                 
@@ -393,10 +398,10 @@ Only respond with the JSON array. Include at least 5 metrics.
         challenges: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Perform complete solution analysis.
-        
+        Perform complete solution analysis for a topic and proposed solution.
+
         Args:
-            topic: Main topic
+            topic: Topic being analyzed
             solution: Proposed solution description
             challenges: List of challenge dictionaries
             

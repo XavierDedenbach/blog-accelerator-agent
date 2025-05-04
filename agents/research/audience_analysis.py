@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
+import asyncio
 
 from langchain.callbacks.manager import CallbackManagerForChainRun
 from langchain.chains.llm import LLMChain
@@ -146,120 +147,138 @@ class AudienceAnalyzer:
     def _init_prompts(self):
         """Initialize prompts for audience analysis."""
         self.identify_segments_prompt = PromptTemplate(
-            input_variables=["topic", "min_segments"],
-            template="""You are analyzing the target audience for content about: {topic}.
-            
-Your task is to identify at least {min_segments} distinct audience segments who would be interested in this topic. 
-Focus on segments that are:
-1. Specific and well-defined
-2. Likely to have genuine interest in the topic
-3. Diverse in their backgrounds, needs, and motivations
-4. Relevant to the topic's domain
-5. Actionable for content creation purposes
+            input_variables=["topic", "min_segments", "existing_segments"],
+            template="""You are identifying distinct target audience segments for content related to the topic: {topic}. Consider the default segments provided, but refine or add based on the specific topic.
 
-For each audience segment:
-1. Provide a clear name/title for the segment
-2. Write a detailed description (2-3 sentences)
-3. Describe their primary motivations for engaging with this topic
-4. Identify their key pain points related to this topic
-5. Estimate their existing knowledge/expertise level (beginner, intermediate, advanced, expert)
-6. Suggest search terms to find data about this audience segment
+            Default Segments (for context):
+            {existing_segments}
 
-Format your response as a JSON array of segment objects with these fields:
-- name: Name of the audience segment
-- description: Detailed description
-- motivations: Array of primary motivations
-- pain_points: Array of key pain points
-- knowledge_level: One of: "beginner", "intermediate", "advanced", or "expert"
-- search_terms: Array of search terms to find data about this segment
+            Topic: {topic}
 
-Only respond with the JSON array. Include at least {min_segments} distinct audience segments.
+            **Step 1: Reflect on Topic Relevance & Potential Audiences**
+            Before defining segments, briefly consider who would be most interested in or impacted by '{topic}'. Think about different roles, industries, levels of expertise, motivations (e.g., learning, problem-solving, strategic insight), and potential pain points related to this specific topic. How does the topic intersect with the default segments? Are there gaps?
 
-Important: Consider how this topic might specifically appeal to: STEM students in college, technical professionals, engineers, founders, and business people.
-"""
+            **Step 2: Define Target Audience Segments**
+            Based on your reflection and the topic '{topic}', define at least {min_segments} distinct and relevant audience segments. You can adapt the default segments or create new ones specific to the topic. Ensure segments are:
+            1. Clearly distinct from each other.
+            2. Directly relevant to the specific topic '{topic}'.
+            3. Described with sufficient detail to understand their perspective.
+
+            For each segment:
+            1. Provide a clear name (e.g., "Hardware Engineers implementing {topic}", "VCs evaluating {topic} startups").
+            2. Write a detailed description (2-3 sentences) explaining who they are and their relationship to the topic.
+            3. List their likely motivations for engaging with content on this topic.
+            4. List potential pain points or challenges they face related to this topic.
+            5. Estimate their general knowledge level regarding this specific topic (e.g., beginner, intermediate, advanced, expert).
+            6. Suggest search terms to find demographic data or discussions involving this audience segment related to the topic.
+
+            Format your response as a JSON array of segment objects with these fields:
+            - name: Specific name of the segment
+            - description: Detailed description related to the topic
+            - motivations: Array of topic-specific motivations
+            - pain_points: Array of topic-specific pain points
+            - knowledge_level: Estimated topic-specific knowledge level
+            - search_terms: Array of nuanced search terms
+
+            Only respond with the JSON array. Include at least {min_segments} segments.
+            """
         )
         
         self.analyze_needs_prompt = PromptTemplate(
-            input_variables=["segment", "topic"],
-            template="""You are deeply analyzing the needs and goals of a specific audience segment interested in: {topic}.
+            input_variables=["segment_name", "segment_description", "topic"],
+            template="""You are analyzing the specific needs and pain points of a target audience segment regarding a specific topic.
 
-Audience Segment: {segment}
+            Audience Segment: {segment_name}
+            Description: {segment_description}
+            Topic: {topic}
 
-Your task is to analyze this segment's needs, goals, and preferences in depth. Focus on:
-1. What specific problems they need solved related to this topic
-2. What goals they want to achieve by learning about this topic
-3. What content formats and styles would appeal to this segment
-4. What level of technical detail is appropriate for this segment
-5. What would make content about this topic valuable to them
+            **Step 1: Reflect on Segment's Perspective**
+            Consider the '{segment_name}' based on their description. From their perspective, what are the most critical aspects of '{topic}'? What questions would they likely have? What problems related to '{topic}' are they trying to solve? What are their biggest frustrations or challenges when trying to understand or apply '{topic}'?
 
-Format your response as a JSON object with these fields:
-- problems_to_solve: Array of specific problems this segment needs solved
-- goals: Array of goals they want to achieve
-- preferred_formats: Array of content formats that would appeal to them (e.g., tutorials, case studies)
-- technical_detail: One of: "minimal", "moderate", "substantial", or "comprehensive"
-- value_creators: Array of elements that would make content valuable to this segment
+            **Step 2: Detail Needs and Pain Points**
+            Based on your reflection, provide a detailed analysis of this segment's needs and pain points specifically related to '{topic}'.
+            Structure the analysis into:
+            - Information Needs: What specific information or knowledge are they lacking or seeking about '{topic}'? (List 3-5 specific needs)
+            - Key Questions: What are the top 3-5 questions this segment likely has about '{topic}'?
+            - Core Pain Points: What are the primary frustrations or difficulties they experience concerning '{topic}'? (List 3-5 specific pain points)
+            - Desired Outcomes: What do they hope to achieve by learning about or engaging with '{topic}'?
 
-Only respond with the JSON object.
-"""
+            Format your response as a JSON object with these keys:
+            - information_needs: Array of specific information needs (strings)
+            - key_questions: Array of likely questions (strings)
+            - core_pain_points: Array of specific pain points (strings)
+            - desired_outcomes: Array of desired outcomes (strings)
+
+            Only respond with the JSON object.
+            """
         )
         
         self.evaluate_knowledge_prompt = PromptTemplate(
-            input_variables=["segment", "topic"],
-            template="""You are evaluating the existing knowledge and expertise level of a specific audience segment interested in: {topic}.
+            input_variables=["segment_name", "segment_description", "topic"],
+            template="""You are evaluating the existing knowledge level and potential misconceptions of a target audience segment regarding a specific topic.
 
-Audience Segment: {segment}
+            Audience Segment: {segment_name}
+            Description: {segment_description}
+            Topic: {topic}
 
-Your task is to evaluate what this segment likely already knows about the topic, and where their knowledge gaps are. Focus on:
-1. Fundamental concepts they likely already understand
-2. Technical terminology they are probably familiar with
-3. Specific knowledge gaps they likely have
-4. Common misconceptions they might hold
-5. Areas where they would benefit from deeper explanation
+            **Step 1: Reflect on Likely Background and Exposure**
+            Consider the '{segment_name}' based on their description. What is their likely educational or professional background? How much exposure have they likely had to '{topic}' or related concepts? What common assumptions or simplifications might they hold about '{topic}'? Are there potential areas of confusion or common misconceptions for this type of audience?
 
-Format your response as a JSON object with these fields:
-- existing_knowledge: Array of concepts they likely already understand
-- familiar_terminology: Array of technical terms they probably know
-- knowledge_gaps: Array of areas where they likely lack knowledge
-- misconceptions: Array of common misconceptions they might hold
-- areas_for_explanation: Array of topics that would benefit from deeper explanation
+            **Step 2: Evaluate Knowledge Level and Misconceptions**
+            Based on your reflection, provide an evaluation of this segment's likely knowledge state regarding '{topic}'.
+            Structure the evaluation into:
+            - Assumed Knowledge: What foundational concepts or background related to '{topic}' can likely be assumed?
+            - Likely Knowledge Gaps: What specific areas of '{topic}' are they likely unfamiliar with? (List 3-5 specific gaps)
+            - Potential Misconceptions: What common misunderstandings or incorrect assumptions might they have about '{topic}'? (List 2-4 potential misconceptions)
+            - Technical Depth Tolerance: How much technical detail are they likely comfortable with regarding '{topic}'? (e.g., High-level overview, moderate detail, deep technical specifics)
 
-Only respond with the JSON object.
-"""
+            Format your response as a JSON object with these keys:
+            - assumed_knowledge: Array of assumed concepts (strings)
+            - likely_knowledge_gaps: Array of specific knowledge gaps (strings)
+            - potential_misconceptions: Array of potential misconceptions (strings)
+            - technical_depth_tolerance: String describing tolerance level
+
+            Only respond with the JSON object.
+            """
         )
         
         self.recommend_strategies_prompt = PromptTemplate(
-            input_variables=["segment", "topic", "needs", "knowledge"],
-            template="""You are recommending content strategies for a specific audience segment interested in: {topic}.
+            input_variables=["segment_name", "topic", "needs_analysis", "knowledge_evaluation"],
+            template="""You are recommending content strategies tailored to a specific audience segment for a given topic, based on their needs and knowledge level.
 
-Audience Segment: {segment}
+            Audience Segment: {segment_name}
+            Topic: {topic}
 
-Their needs and preferences:
-{needs}
+            Needs Analysis Summary:
+            {needs_analysis}
 
-Their knowledge level:
-{knowledge}
+            Knowledge Evaluation Summary:
+            {knowledge_evaluation}
 
-Your task is to recommend specific content strategies that would effectively engage this audience segment. Focus on:
-1. Key topics to prioritize for this segment
-2. Effective framing and positioning approaches
-3. Content formats and structures that would work well
-4. Specific examples, stories, or case studies that would resonate
-5. Tone and style recommendations
+            **Step 1: Reflect on Bridging the Gap**
+            Consider the segment's needs, pain points, knowledge gaps, and potential misconceptions. How can content effectively bridge the gap between their current state and their desired outcomes related to '{topic}'? What approaches would resonate best given their background and technical depth tolerance? What formats or angles would be most engaging?
 
-Format your response as a JSON object with these fields:
-- priority_topics: Array of key topics to prioritize
-- framing_approaches: Array of effective framing/positioning approaches
-- recommended_formats: Array of content formats and structures
-- examples_to_include: Array of specific examples or case studies to consider
-- tone_recommendations: Array of tone and style recommendations
+            **Step 2: Recommend Content Strategies**
+            Based on your reflection, recommend 3-5 specific content strategies tailored for the '{segment_name}' regarding '{topic}'.
+            For each strategy:
+            1. Provide a clear title (e.g., "Use Case Deep Dive", "Misconception Buster Q&A", "Comparative Analysis Framework").
+            2. Describe the strategy (2-3 sentences), explaining the angle, format, or approach.
+            3. Explain *why* this strategy is suitable for this specific segment, referencing their needs, knowledge, or pain points.
+            4. Suggest key elements or content points to include within this strategy.
 
-Only respond with the JSON object.
-"""
+            Format your response as a JSON array of strategy objects with these fields:
+            - title: Title of the content strategy
+            - description: Description of the strategy's angle/format
+            - suitability_rationale: Explanation of why it fits this segment
+            - key_elements: Array of suggested content points/elements
+
+            Only respond with the JSON array.
+            """
         )
     
     async def identify_audience_segments(self, topic: str) -> List[Dict[str, Any]]:
         """
-        Identify distinct audience segments for a topic.
+        Identify target audience segments for a topic, reflecting on relevance first.
         
         Args:
             topic: Topic to analyze
@@ -267,20 +286,10 @@ Only respond with the JSON object.
         Returns:
             List of audience segment dictionaries
         """
-        # If using default segments, return them with search terms for the topic
-        if self.use_default_segments:
-            segments = self.DEFAULT_AUDIENCE_SEGMENTS.copy()
-            # Add search terms for each segment based on the topic
-            for segment in segments:
-                segment["search_terms"] = [
-                    f"{segment['name']} {topic}",
-                    f"{topic} for {segment['name']}",
-                    f"{segment['name']} needs {topic}"
-                ]
-            logger.info(f"Using default audience segments for topic: {topic}")
-            return segments
-            
         try:
+            # Format existing segments for prompt
+            existing_segments_text = json.dumps(self.DEFAULT_AUDIENCE_SEGMENTS, indent=2)
+            
             # Create chain for segment identification
             chain = LLMChain(
                 llm=self.llm,
@@ -288,9 +297,11 @@ Only respond with the JSON object.
             )
             
             # Run the chain
+            logger.info(f"Identifying audience segments for topic: {topic} with relevance reflection...")
             response = await chain.arun(
                 topic=topic,
-                min_segments=self.min_segments
+                min_segments=self.min_segments,
+                existing_segments=existing_segments_text
             )
             
             # Parse JSON response
@@ -304,27 +315,21 @@ Only respond with the JSON object.
             raise AudienceAnalysisError(f"Failed to identify audience segments: {e}")
     
     async def analyze_segment_needs(
-        self, 
+        self,
         segment: Dict[str, Any],
         topic: str
     ) -> Dict[str, Any]:
         """
-        Analyze the needs and goals of an audience segment.
+        Analyze the needs and pain points of a segment, reflecting on perspective first.
         
         Args:
             segment: Audience segment dictionary
-            topic: Main topic
+            topic: Topic being analyzed
             
         Returns:
-            Dictionary with needs analysis
+            Dictionary with needs analysis (needs, questions, pain points, outcomes)
         """
         try:
-            # Format segment for prompt
-            segment_text = f"{segment.get('name', 'Unknown Segment')}: {segment.get('description', 'No description')}\n"
-            segment_text += f"Motivations: {', '.join(segment.get('motivations', []))}\n"
-            segment_text += f"Pain points: {', '.join(segment.get('pain_points', []))}\n"
-            segment_text += f"Knowledge level: {segment.get('knowledge_level', 'Unknown')}"
-            
             # Create chain for needs analysis
             chain = LLMChain(
                 llm=self.llm,
@@ -332,41 +337,41 @@ Only respond with the JSON object.
             )
             
             # Run the chain
+            segment_name = segment.get('name', 'Unknown Segment')
+            logger.info(f"Analyzing needs for segment: {segment_name} with perspective reflection...")
             response = await chain.arun(
-                segment=segment_text,
+                segment_name=segment_name,
+                segment_description=segment.get('description', ''),
                 topic=topic
             )
             
             # Parse JSON response
             needs = json.loads(response)
             
-            logger.info(f"Analyzed needs for segment: {segment.get('name', '')}")
+            logger.info(f"Analyzed needs for segment: {segment_name}")
             return needs
             
         except Exception as e:
-            logger.error(f"Error analyzing needs for segment {segment.get('name', '')}: {e}")
+            segment_name = segment.get('name', 'Unknown Segment')
+            logger.error(f"Error analyzing needs for segment {segment_name}: {e}")
             raise AudienceAnalysisError(f"Failed to analyze segment needs: {e}")
     
     async def evaluate_segment_knowledge(
-        self, 
+        self,
         segment: Dict[str, Any],
         topic: str
     ) -> Dict[str, Any]:
         """
-        Evaluate the existing knowledge of an audience segment.
+        Evaluate the knowledge level of a segment, reflecting on background first.
         
         Args:
             segment: Audience segment dictionary
-            topic: Main topic
+            topic: Topic being analyzed
             
         Returns:
-            Dictionary with knowledge evaluation
+            Dictionary with knowledge evaluation (assumed, gaps, misconceptions, depth)
         """
         try:
-            # Format segment for prompt
-            segment_text = f"{segment.get('name', 'Unknown Segment')}: {segment.get('description', 'No description')}\n"
-            segment_text += f"Knowledge level: {segment.get('knowledge_level', 'Unknown')}"
-            
             # Create chain for knowledge evaluation
             chain = LLMChain(
                 llm=self.llm,
@@ -374,19 +379,23 @@ Only respond with the JSON object.
             )
             
             # Run the chain
+            segment_name = segment.get('name', 'Unknown Segment')
+            logger.info(f"Evaluating knowledge for segment: {segment_name} with background reflection...")
             response = await chain.arun(
-                segment=segment_text,
+                segment_name=segment_name,
+                segment_description=segment.get('description', ''),
                 topic=topic
             )
             
             # Parse JSON response
             knowledge = json.loads(response)
             
-            logger.info(f"Evaluated knowledge for segment: {segment.get('name', '')}")
+            logger.info(f"Evaluated knowledge for segment: {segment_name}")
             return knowledge
             
         except Exception as e:
-            logger.error(f"Error evaluating knowledge for segment {segment.get('name', '')}: {e}")
+            segment_name = segment.get('name', 'Unknown Segment')
+            logger.error(f"Error evaluating knowledge for segment {segment_name}: {e}")
             raise AudienceAnalysisError(f"Failed to evaluate segment knowledge: {e}")
     
     async def recommend_content_strategies(
@@ -395,58 +404,130 @@ Only respond with the JSON object.
         topic: str,
         needs: Dict[str, Any],
         knowledge: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    ) -> List[Dict[str, Any]]:
         """
-        Recommend content strategies for an audience segment.
+        Recommend content strategies for a segment, reflecting on bridging gaps first.
         
         Args:
             segment: Audience segment dictionary
-            topic: Main topic
+            topic: Topic being analyzed
             needs: Needs analysis dictionary
             knowledge: Knowledge evaluation dictionary
             
         Returns:
-            Dictionary with content strategy recommendations
+            List of recommended content strategy dictionaries
         """
         try:
-            # Format segment for prompt
-            segment_text = f"{segment.get('name', 'Unknown Segment')}: {segment.get('description', 'No description')}\n"
-            segment_text += f"Knowledge level: {segment.get('knowledge_level', 'Unknown')}"
+            # Format needs and knowledge for prompt
+            needs_text = json.dumps(needs, indent=2)
+            knowledge_text = json.dumps(knowledge, indent=2)
             
-            # Format needs for prompt
-            needs_text = f"Problems to solve: {', '.join(needs.get('problems_to_solve', []))}\n"
-            needs_text += f"Goals: {', '.join(needs.get('goals', []))}\n"
-            needs_text += f"Preferred formats: {', '.join(needs.get('preferred_formats', []))}\n"
-            needs_text += f"Technical detail: {needs.get('technical_detail', 'Unknown')}"
-            
-            # Format knowledge for prompt
-            knowledge_text = f"Existing knowledge: {', '.join(knowledge.get('existing_knowledge', []))}\n"
-            knowledge_text += f"Knowledge gaps: {', '.join(knowledge.get('knowledge_gaps', []))}\n"
-            knowledge_text += f"Misconceptions: {', '.join(knowledge.get('misconceptions', []))}"
-            
-            # Create chain for strategy recommendations
+            # Create chain for strategy recommendation
             chain = LLMChain(
                 llm=self.llm,
                 prompt=self.recommend_strategies_prompt
             )
             
             # Run the chain
-            response = await chain.arun(
-                segment=segment_text,
-                topic=topic,
-                needs=needs_text,
-                knowledge=knowledge_text
-            )
+            segment_name = segment.get('name', 'Unknown Segment')
+            logger.info(f"Recommending strategies for segment: {segment_name} with gap-bridging reflection...")
             
-            # Parse JSON response
-            strategies = json.loads(response)
+            max_retries = 3
+            retry_count = 0
             
-            logger.info(f"Recommended content strategies for segment: {segment.get('name', '')}")
-            return strategies
+            while retry_count < max_retries:
+                try:
+                    response = await chain.arun(
+                        segment_name=segment_name,
+                        topic=topic,
+                        needs_analysis=needs_text,
+                        knowledge_evaluation=knowledge_text
+                    )
+                    
+                    # Parse JSON response
+                    strategies = json.loads(response)
+                    
+                    logger.info(f"Recommended {len(strategies)} strategies for segment: {segment_name}")
+                    return strategies
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    retry_count += 1
+                    
+                    # Check if it's a rate limit error
+                    if any(err in error_msg.lower() for err in ["429", "rate limit", "quota", "capacity", "tokens per min"]):
+                        if retry_count < max_retries:
+                            wait_time = 5 * retry_count  # Exponential backoff
+                            logger.warning(f"Rate limit error, retrying in {wait_time} seconds: {e}")
+                            await asyncio.sleep(wait_time)
+                        else:
+                            logger.error(f"Maximum retries reached for rate limit error: {e}")
+                            raise
+                    else:
+                        # Not a rate limit error, re-raise
+                        raise
+            
+            # Should not reach here, but just in case
+            raise ValueError("Exceeded maximum retries")
             
         except Exception as e:
-            logger.error(f"Error recommending strategies for segment {segment.get('name', '')}: {e}")
+            segment_name = segment.get('name', 'Unknown Segment')
+            logger.error(f"Error recommending strategies for segment {segment_name}: {e}")
+            
+            # Return fallback strategies if we can't get the API to work
+            if "429" in str(e) or "rate limit" in str(e).lower() or "quota" in str(e).lower():
+                logger.warning(f"Using fallback strategies due to API rate limits")
+                return self._fallback_strategies(segment_name, topic)
+            
             raise AudienceAnalysisError(f"Failed to recommend content strategies: {e}")
+    
+    def _fallback_strategies(self, segment_name: str, topic: str) -> List[Dict[str, Any]]:
+        """
+        Provide fallback content strategies when API calls fail.
+        
+        Args:
+            segment_name: Name of the audience segment
+            topic: Topic being analyzed
+            
+        Returns:
+            List of basic content strategies
+        """
+        # Create some basic strategies that would work for most segments
+        return [
+            {
+                "title": "Comprehensive Guide",
+                "description": f"A detailed guide explaining {topic} from the ground up, tailored for {segment_name}",
+                "suitability_rationale": f"Provides complete information for {segment_name} regardless of prior knowledge level",
+                "key_elements": [
+                    "Step-by-step explanations",
+                    "Visual diagrams",
+                    "Real-world examples",
+                    "Common pitfalls to avoid"
+                ]
+            },
+            {
+                "title": "Problem-Solution Framework",
+                "description": f"Content that frames {topic} in terms of common problems faced by {segment_name} and their solutions",
+                "suitability_rationale": "Directly addresses pain points and motivates engagement through practical problem-solving",
+                "key_elements": [
+                    "Problem statements relevant to the audience",
+                    "Step-by-step solutions",
+                    "Case studies and success stories",
+                    "Implementation guidance"
+                ]
+            },
+            {
+                "title": "Comparison Analysis",
+                "description": f"Compare and contrast {topic} with alternatives or previous approaches familiar to {segment_name}",
+                "suitability_rationale": "Builds on existing knowledge and helps with decision-making",
+                "key_elements": [
+                    "Side-by-side comparisons",
+                    "Pros and cons analysis",
+                    "Use case considerations",
+                    "Decision framework"
+                ]
+            }
+        ]
     
     async def find_sources_for_segment(
         self, 
@@ -454,16 +535,18 @@ Only respond with the JSON object.
         count: int = 3
     ) -> List[Dict[str, Any]]:
         """
-        Find supporting sources for an audience segment.
+        Find sources relevant to an audience segment.
         
         Args:
-            segment: Audience segment dictionary with search_terms
-            count: Number of sources to find per search term
+            segment: Audience segment to find sources for
+            count: Number of sources to find
             
         Returns:
-            List of source dictionaries
+            List of sources
         """
         all_sources = []
+        
+        # Use search terms if available
         search_terms = segment.get("search_terms", [])
         
         if not search_terms:
@@ -475,7 +558,7 @@ Only respond with the JSON object.
             try:
                 # Search for sources
                 query = f"{term} audience data {segment.get('name', '')}"
-                supporting, _ = self.source_validator.find_supporting_contradicting_sources(
+                supporting, _ = await self.source_validator.find_supporting_contradicting_sources(
                     query, count=count
                 )
                 
@@ -513,7 +596,7 @@ Only respond with the JSON object.
         
         try:
             # Identify audience segments
-            logger.info(f"Identifying audience segments for topic: {topic}")
+            # Logger message moved to identify_audience_segments
             segments = await self.identify_audience_segments(topic)
             
             # Ensure we have at least min_segments
@@ -526,20 +609,21 @@ Only respond with the JSON object.
             # Process each segment
             enriched_segments = []
             for segment in segments:
+                segment_name = segment.get('name', 'Unknown Segment')
                 # Find sources
-                logger.info(f"Finding sources for segment: {segment.get('name', '')}")
+                logger.info(f"Finding sources for segment: {segment_name}")
                 sources = await self.find_sources_for_segment(segment)
                 
                 # Analyze needs
-                logger.info(f"Analyzing needs for segment: {segment.get('name', '')}")
+                # Logger message moved to analyze_segment_needs
                 needs = await self.analyze_segment_needs(segment, topic)
                 
                 # Evaluate knowledge
-                logger.info(f"Evaluating knowledge for segment: {segment.get('name', '')}")
+                # Logger message moved to evaluate_segment_knowledge
                 knowledge = await self.evaluate_segment_knowledge(segment, topic)
                 
                 # Recommend strategies
-                logger.info(f"Recommending strategies for segment: {segment.get('name', '')}")
+                # Logger message moved to recommend_content_strategies
                 strategies = await self.recommend_content_strategies(segment, topic, needs, knowledge)
                 
                 # Add to enriched segments
