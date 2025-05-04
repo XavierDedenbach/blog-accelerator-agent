@@ -155,11 +155,17 @@ class AudienceAnalyzer:
 
             Topic: {topic}
 
-            **Step 1: Reflect on Topic Relevance & Potential Audiences**
-            Before defining segments, briefly consider who would be most interested in or impacted by '{topic}'. Think about different roles, industries, levels of expertise, motivations (e.g., learning, problem-solving, strategic insight), and potential pain points related to this specific topic. How does the topic intersect with the default segments? Are there gaps?
+            **Step 1: Identify Core Constraints**
+            Consider the inherent limitations in audience targeting for '{topic}', such as knowledge prerequisites, access barriers, and relevance boundaries. Who is fundamentally excluded or included by the nature of the topic?
 
-            **Step 2: Define Target Audience Segments**
-            Based on your reflection and the topic '{topic}', define at least {min_segments} distinct and relevant audience segments. You can adapt the default segments or create new ones specific to the topic. Ensure segments are:
+            **Step 2: Consider Systemic Context**
+            Reflect on how '{topic}' fits within broader professional, social, or market ecosystems. What adjacent fields or interest areas create natural audience connections?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider the various roles, positions, and viewpoints related to '{topic}'. Who has direct interest, indirect interest, decision-making power, or implementation responsibility?
+
+            **Step 4: Identify Target Segments**
+            Based on your reflections, define at least {min_segments} distinct and relevant audience segments for '{topic}'. You can adapt the default segments or create new ones specific to the topic. Ensure segments are:
             1. Clearly distinct from each other.
             2. Directly relevant to the specific topic '{topic}'.
             3. Described with sufficient detail to understand their perspective.
@@ -170,7 +176,12 @@ class AudienceAnalyzer:
             3. List their likely motivations for engaging with content on this topic.
             4. List potential pain points or challenges they face related to this topic.
             5. Estimate their general knowledge level regarding this specific topic (e.g., beginner, intermediate, advanced, expert).
-            6. Suggest search terms to find demographic data or discussions involving this audience segment related to the topic.
+
+            **Step 5: Generate Supporting Evidence**
+            For each segment, briefly identify where you might find data or information to validate the size and characteristics of this audience (e.g., industry reports, professional associations, social media groups).
+
+            **Step 6: Test Counter-Arguments**
+            For each segment, briefly address one reason why this segment might be considered too broad, too narrow, or otherwise problematic, and explain why it remains a valid and useful audience segment despite this concern.
 
             Format your response as a JSON array of segment objects with these fields:
             - name: Specific name of the segment
@@ -178,6 +189,9 @@ class AudienceAnalyzer:
             - motivations: Array of topic-specific motivations
             - pain_points: Array of topic-specific pain points
             - knowledge_level: Estimated topic-specific knowledge level
+            - validation_sources: Where to find data about this audience
+            - potential_critique: A potential criticism of this segment definition
+            - critique_response: Why the segment remains valid despite the critique
             - search_terms: Array of nuanced search terms
 
             Only respond with the JSON array. Include at least {min_segments} segments.
@@ -192,22 +206,37 @@ class AudienceAnalyzer:
             Description: {segment_description}
             Topic: {topic}
 
-            **Step 1: Reflect on Segment's Perspective**
-            Consider the '{segment_name}' based on their description. From their perspective, what are the most critical aspects of '{topic}'? What questions would they likely have? What problems related to '{topic}' are they trying to solve? What are their biggest frustrations or challenges when trying to understand or apply '{topic}'?
+            **Step 1: Identify Core Constraints**
+            Consider the fundamental limitations this audience segment faces in relation to '{topic}', such as time, resources, knowledge, or access constraints. What restricts their engagement or success?
 
-            **Step 2: Detail Needs and Pain Points**
-            Based on your reflection, provide a detailed analysis of this segment's needs and pain points specifically related to '{topic}'.
+            **Step 2: Consider Systemic Context**
+            Reflect on how this segment operates within broader systems related to '{topic}'. What external pressures, requirements, or dependencies affect their needs?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider how this segment interacts with other stakeholders in relation to '{topic}'. How do these relationships shape their specific needs and challenges?
+
+            **Step 4: Identify Specific Needs**
+            Based on your reflections, provide a detailed analysis of this segment's needs and pain points specifically related to '{topic}'.
             Structure the analysis into:
             - Information Needs: What specific information or knowledge are they lacking or seeking about '{topic}'? (List 3-5 specific needs)
             - Key Questions: What are the top 3-5 questions this segment likely has about '{topic}'?
             - Core Pain Points: What are the primary frustrations or difficulties they experience concerning '{topic}'? (List 3-5 specific pain points)
             - Desired Outcomes: What do they hope to achieve by learning about or engaging with '{topic}'?
 
+            **Step 5: Generate Supporting Evidence**
+            Briefly describe how these needs could be validated or further researched (e.g., surveys, interviews, search trend analysis, forum discussions).
+
+            **Step 6: Test Counter-Arguments**
+            For each major need or pain point identified, briefly consider one potential objection or alternative perspective, and explain why your analysis remains valid despite this challenge.
+
             Format your response as a JSON object with these keys:
             - information_needs: Array of specific information needs (strings)
             - key_questions: Array of likely questions (strings)
             - core_pain_points: Array of specific pain points (strings)
             - desired_outcomes: Array of desired outcomes (strings)
+            - validation_methods: Ways to validate these needs
+            - potential_objections: Array of possible objections to your analysis
+            - objection_responses: Array of responses to those objections
 
             Only respond with the JSON object.
             """
@@ -221,22 +250,37 @@ class AudienceAnalyzer:
             Description: {segment_description}
             Topic: {topic}
 
-            **Step 1: Reflect on Likely Background and Exposure**
-            Consider the '{segment_name}' based on their description. What is their likely educational or professional background? How much exposure have they likely had to '{topic}' or related concepts? What common assumptions or simplifications might they hold about '{topic}'? Are there potential areas of confusion or common misconceptions for this type of audience?
+            **Step 1: Identify Core Constraints**
+            Consider what fundamental limitations affect this segment's knowledge acquisition about '{topic}', such as educational background, professional exposure, or access to information sources.
 
-            **Step 2: Evaluate Knowledge Level and Misconceptions**
-            Based on your reflection, provide an evaluation of this segment's likely knowledge state regarding '{topic}'.
+            **Step 2: Consider Systemic Context**
+            Reflect on how broader systems (educational, professional, media) have shaped this segment's understanding of '{topic}'. What systemic factors influence their knowledge base?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider how this segment's relationship with other stakeholders affects their knowledge and perspective on '{topic}'. How do interactions with others shape their understanding?
+
+            **Step 4: Evaluate Knowledge State**
+            Based on your reflections, provide an evaluation of this segment's likely knowledge state regarding '{topic}'.
             Structure the evaluation into:
             - Assumed Knowledge: What foundational concepts or background related to '{topic}' can likely be assumed?
             - Likely Knowledge Gaps: What specific areas of '{topic}' are they likely unfamiliar with? (List 3-5 specific gaps)
             - Potential Misconceptions: What common misunderstandings or incorrect assumptions might they have about '{topic}'? (List 2-4 potential misconceptions)
             - Technical Depth Tolerance: How much technical detail are they likely comfortable with regarding '{topic}'? (e.g., High-level overview, moderate detail, deep technical specifics)
 
+            **Step 5: Generate Supporting Evidence**
+            Briefly describe what evidence would help validate your assessment of this segment's knowledge level (e.g., quiz performance, common questions in forums, typical errors in implementation).
+
+            **Step 6: Test Counter-Arguments**
+            For each major knowledge gap or misconception identified, briefly consider one reason why your assessment might be incorrect, and explain why your analysis remains valid despite this possibility.
+
             Format your response as a JSON object with these keys:
             - assumed_knowledge: Array of assumed concepts (strings)
             - likely_knowledge_gaps: Array of specific knowledge gaps (strings)
             - potential_misconceptions: Array of potential misconceptions (strings)
             - technical_depth_tolerance: String describing tolerance level
+            - validation_evidence: Ways to validate this knowledge assessment
+            - assessment_challenges: Array of challenges to your knowledge assessment
+            - challenge_responses: Array of responses to those challenges
 
             Only respond with the JSON object.
             """
@@ -255,22 +299,37 @@ class AudienceAnalyzer:
             Knowledge Evaluation Summary:
             {knowledge_evaluation}
 
-            **Step 1: Reflect on Bridging the Gap**
-            Consider the segment's needs, pain points, knowledge gaps, and potential misconceptions. How can content effectively bridge the gap between their current state and their desired outcomes related to '{topic}'? What approaches would resonate best given their background and technical depth tolerance? What formats or angles would be most engaging?
+            **Step 1: Identify Core Constraints**
+            Consider what fundamental limitations might affect content strategy for this audience, such as attention span, access channels, or format preferences. What boundaries must be respected?
 
-            **Step 2: Recommend Content Strategies**
-            Based on your reflection, recommend 3-5 specific content strategies tailored for the '{segment_name}' regarding '{topic}'.
+            **Step 2: Consider Systemic Context**
+            Reflect on how this segment typically consumes content within their broader ecosystem. What contextual factors influence effective content delivery?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider how this segment's interactions with other stakeholders should influence content strategy. How might content facilitate these relationships?
+
+            **Step 4: Identify Content Strategies**
+            Based on your reflections, recommend 3-5 specific content strategies tailored for the '{segment_name}' regarding '{topic}'.
             For each strategy:
             1. Provide a clear title (e.g., "Use Case Deep Dive", "Misconception Buster Q&A", "Comparative Analysis Framework").
             2. Describe the strategy (2-3 sentences), explaining the angle, format, or approach.
             3. Explain *why* this strategy is suitable for this specific segment, referencing their needs, knowledge, or pain points.
             4. Suggest key elements or content points to include within this strategy.
 
+            **Step 5: Generate Supporting Evidence**
+            For each strategy, briefly describe what evidence or examples suggest this approach would be effective (e.g., similar successful content, engagement patterns, learning theory).
+
+            **Step 6: Test Counter-Arguments**
+            For each strategy, briefly address one potential criticism or limitation of this approach, and explain how the strategy could be adjusted to address this concern.
+
             Format your response as a JSON array of strategy objects with these fields:
             - title: Title of the content strategy
             - description: Description of the strategy's angle/format
             - suitability_rationale: Explanation of why it fits this segment
             - key_elements: Array of suggested content points/elements
+            - supporting_evidence: Evidence suggesting effectiveness
+            - potential_limitation: A potential criticism or limitation
+            - adaptation_response: How to adjust for this limitation
 
             Only respond with the JSON array.
             """

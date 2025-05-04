@@ -111,23 +111,37 @@ Proposed Solution: {solution}
 The solution aims to address the following challenges:
 {challenges}
 
-**Step 1: Reflect on Context & Constraints**
-Briefly consider the challenges listed and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities) when implementing a solution like '{solution}'. How might these factors influence the potential benefits?
+**Step 1: Identify Core Constraints**
+Briefly consider the challenges listed and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities) when implementing a solution like '{solution}'. What are the key limitations and boundaries?
 
-**Step 2: Generate PRO Arguments**
-Based on your reflection, generate at least {min_arguments} compelling PRO arguments supporting this solution *in this specific context*.
+**Step 2: Consider Systemic Context**
+Reflect on how '{solution}' fits within the broader ecosystem and market landscape. What upstream and downstream dependencies might affect its implementation and success?
+
+**Step 3: Map Stakeholder Perspectives**
+Consider the various stakeholders (developers, users, investors, etc.) who would be affected by or involved in implementing '{solution}'. How might their different perspectives influence the value assessment?
+
+**Step 4: Identify Potential Benefits**
+Based on your reflections, generate at least {min_arguments} compelling PRO arguments supporting this solution in this specific context.
 For each argument:
 1. Provide a clear name/title
 2. Write a detailed description (2-3 sentences) explaining why this is a strong argument, linking back to the constraints or challenges where relevant.
 3. Specify what needs to be true for this argument to be valid (prerequisites), considering the context.
 4. Suggest metrics that could measure the success of this aspect of the solution, relevant to the constraints.
-5. Suggest search terms to find supporting evidence for this argument, considering the nuances.
+
+**Step 5: Generate Supporting Evidence**
+For each argument, consider what evidence would support this claim. What data points, case studies, or examples might strengthen this argument?
+
+**Step 6: Test Counter-Arguments**
+For each PRO argument, briefly identify one potential counter-argument and how you would respond to it. This will strengthen the original argument by addressing potential weaknesses.
 
 Format your response as a JSON array of argument objects with these fields:
 - name: Title of the argument
 - description: Detailed description linking to context/constraints
 - prerequisites: Context-aware prerequisites
 - metrics: Array of relevant metrics
+- supporting_evidence: Ideas for evidence that would strengthen this argument
+- potential_counter: A potential counter-argument to this point
+- counter_response: Brief response to the counter-argument
 - search_terms: Array of nuanced search terms
 
 Only respond with the JSON array. Include at least {min_arguments} arguments.
@@ -144,23 +158,37 @@ Proposed Solution: {solution}
 The solution aims to address the following challenges:
 {challenges}
 
-**Step 1: Reflect on Context & Constraints**
-Briefly consider the challenges listed and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities) when implementing a solution like '{solution}'. How might these factors introduce risks or downsides?
+**Step 1: Identify Core Constraints**
+Briefly consider the challenges listed and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities) when implementing a solution like '{solution}'. What are the key limitations and boundaries?
 
-**Step 2: Generate COUNTER Arguments**
-Based on your reflection, generate at least {min_arguments} insightful COUNTER arguments or potential weaknesses of this solution *in this specific context*.
+**Step 2: Consider Systemic Context**
+Reflect on how '{solution}' fits within the broader ecosystem and market landscape. What external factors might create challenges or vulnerabilities?
+
+**Step 3: Map Stakeholder Perspectives**
+Consider the various stakeholders (developers, users, investors, etc.) who would be affected by or involved in implementing '{solution}'. What concerns might they have or what resistance might they show?
+
+**Step 4: Identify Potential Challenges**
+Based on your reflections, generate at least {min_arguments} insightful COUNTER arguments or potential weaknesses of this solution in this specific context.
 For each argument:
 1. Provide a clear name/title
 2. Write a detailed description (2-3 sentences) explaining the potential weakness or risk, linking back to the constraints or challenges where relevant.
 3. Specify what needs to be true for this counter-argument to be significant (conditions).
 4. Suggest ways this risk could potentially be mitigated, considering the constraints.
-5. Suggest search terms to find evidence supporting this counter-argument or exploring its validity.
+
+**Step 5: Generate Supporting Evidence**
+For each counter-argument, consider what evidence would support this concern. What data points, case studies, or examples might validate this potential issue?
+
+**Step 6: Test Pro-Arguments**
+For each COUNTER argument, briefly identify one potential pro-argument that attempts to dismiss this concern and explain why the concern remains valid despite this defense.
 
 Format your response as a JSON array of argument objects with these fields:
 - name: Title of the counter-argument
 - description: Detailed description linking to context/constraints
 - conditions: Conditions making this counter-argument significant
 - mitigation_ideas: Array of potential mitigation strategies (context-aware)
+- supporting_evidence: Ideas for evidence that would strengthen this concern
+- potential_defense: A potential argument that attempts to dismiss this concern
+- defense_rebuttal: Brief explanation of why the concern remains valid
 - search_terms: Array of nuanced search terms
 
 Only respond with the JSON array. Include at least {min_arguments} arguments.
@@ -177,22 +205,37 @@ Proposed Solution: {solution}
 The solution aims to address the following challenges:
 {challenges}
 
-**Step 1: Reflect on Context & Constraints**
-Briefly consider the challenges, the proposed solution, and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities). What aspects of success or failure would be most critical to track for such a team implementing this solution?
+**Step 1: Identify Core Constraints**
+Briefly consider the challenges, the proposed solution, and the typical constraints faced by small, resource-limited teams (e.g., funding, personnel, time-to-market pressure, hardware complexities). What are the key limitations affecting measurement?
 
-**Step 2: Identify Key Metrics**
-Based on your reflection, identify a set of key metrics (aim for 5-10) that would effectively measure the progress and impact of the solution '{solution}' *in this specific context*.
+**Step 2: Consider Systemic Context**
+Reflect on how '{solution}' fits within the broader ecosystem and market landscape. What contextual factors should influence how success is measured?
+
+**Step 3: Map Stakeholder Perspectives**
+Consider the various stakeholders (developers, users, investors, etc.) who would evaluate the success of '{solution}'. What metrics would matter most to each group?
+
+**Step 4: Identify Key Metrics**
+Based on your reflections, identify a set of key metrics (aim for 5-10) that would effectively measure the progress and impact of the solution '{solution}' in this specific context.
 For each metric:
 1. Provide a clear name
 2. Explain *why* this metric is important in the context of the challenges and constraints.
 3. Describe *how* it could be measured practically by a resource-constrained team.
 4. Suggest target ranges or indicators of success/failure where applicable.
 
+**Step 5: Generate Supporting Evidence**
+For each metric, briefly describe what existing benchmarks or industry standards might exist that could help contextualize the measurements.
+
+**Step 6: Test Counter-Arguments**
+For each metric, briefly address one potential criticism about why this metric might be misleading or insufficient, and how you would respond to ensure the metric remains valuable.
+
 Format your response as a JSON array of metric objects with these fields:
 - name: Name of the metric
 - importance_context: Explanation of why it's important in context
 - measurement_method: Practical measurement approach for constrained teams
 - success_indicators: Target ranges or indicators
+- benchmarks: Existing benchmarks or standards for context
+- potential_criticism: A potential criticism of this metric
+- criticism_response: How to address the criticism
 
 Only respond with the JSON array.
 """

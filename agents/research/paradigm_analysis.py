@@ -105,28 +105,42 @@ class ParadigmAnalyzer:
             input_variables=["topic", "min_paradigms"],
             template="""You are analyzing the historical paradigms related to the topic: {topic}.
 
-            **Step 1: Reflect on Core Drivers & Constraints**
-            Before identifying specific paradigms, briefly consider the underlying technological, economic, social, or scientific drivers and constraints that have shaped the evolution of '{topic}' over time. Think about fundamental limitations or breakthroughs that might define different eras.
+            **Step 1: Identify Core Constraints**
+            Begin by considering the fundamental technological, economic, social, or scientific constraints that have shaped the evolution of '{topic}' over time. What hard limitations or boundaries have defined different eras?
 
-            **Step 2: Identify Historical Paradigms**
-            Based on your reflection and the topic '{topic}', identify at least {min_paradigms} significant historical paradigms. Focus on paradigms that represent distinct approaches, worldviews, or sets of core assumptions influenced by the drivers/constraints identified in Step 1. Ensure they are:
+            **Step 2: Consider Systemic Context**
+            Reflect on how '{topic}' fits within broader historical, social, and technological systems. How have larger contextual forces shaped its evolution?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider the various stakeholders throughout history who have influenced or been affected by '{topic}'. How have their perspectives and needs shaped different paradigms?
+
+            **Step 4: Identify Historical Paradigms**
+            Based on your reflections, identify at least {min_paradigms} significant historical paradigms related to '{topic}'. Ensure they are:
             1. Distinct and well-defined
             2. Historically significant and well-documented
-            3. Show clear progression or shifts related to the core drivers/constraints
+            3. Show clear progression or shifts related to the core constraints identified
             4. Relevant to understanding the current state
 
             For each paradigm:
             1. Provide a clear name
-            2. Write a detailed description (2-3 sentences), linking it back to the core drivers/constraints where possible.
+            2. Write a detailed description (2-3 sentences), linking it back to the core constraints where possible.
             3. Specify the approximate time period
-            4. Explain key characteristics defining this paradigm, reflecting the context of Step 1.
-            5. Suggest search terms to find authoritative sources, considering the nuances.
+            4. Explain key characteristics defining this paradigm, reflecting the context of earlier steps.
+
+            **Step 5: Generate Supporting Evidence**
+            For each paradigm, briefly note what types of historical evidence best document or demonstrate its existence and influence.
+
+            **Step 6: Test Counter-Arguments**
+            For each paradigm, briefly identify one potential critique or alternative interpretation of this historical framing, and how you would respond to it.
 
             Format your response as a JSON array of paradigm objects with these fields:
             - name: Name of the paradigm
-            - description: Detailed description linking to drivers/constraints
+            - description: Detailed description linking to constraints
             - time_period: Approximate time period
-            - key_characteristics: Array of context-aware characteristics
+            - key_characteristics: Array of characteristics
+            - supporting_evidence: Types of evidence that document this paradigm
+            - potential_critique: A potential critique of this paradigm framing
+            - critique_response: Brief response to the critique
             - search_terms: Array of nuanced search terms
 
             Only respond with the JSON array. Include at least {min_paradigms} paradigms in chronological order.
@@ -140,23 +154,38 @@ class ParadigmAnalyzer:
             Paradigms (in chronological order):
             {paradigms}
 
-            **Step 1: Reflect on Transition Dynamics**
-            Consider the paradigms provided. What kinds of factors typically drive shifts between such paradigms in this field? Think about technological breakthroughs, market changes, new theoretical insights, failures of the old paradigm, or external pressures. How might the core drivers/constraints identified previously play a role?
+            **Step 1: Identify Core Constraints**
+            Consider what fundamental constraints (technological, economic, social, etc.) were overcome or changed to enable each transition. What key limitations were pushed beyond?
 
-            **Step 2: Analyze Specific Transitions**
-            Based on your reflection, analyze the transition *between each consecutive pair* of paradigms listed above.
+            **Step 2: Consider Systemic Context**
+            Reflect on the broader ecosystem factors that influenced these transitions. What external pressures or opportunities created conditions for change?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider the various stakeholders who would have participated in or resisted these transitions. How did different perspectives influence the adoption of new paradigms?
+
+            **Step 4: Identify Transition Dynamics**
+            Based on your reflections, analyze the transition *between each consecutive pair* of paradigms listed above.
             For each transition:
             1. Identify the 'From' and 'To' paradigms.
-            2. Describe the key factors and events that triggered or facilitated this shift, linking back to the dynamics considered in Step 1.
+            2. Describe the key factors and events that triggered or facilitated this shift, linking back to constraints and context.
             3. Explain the primary tensions or conflicts between the outgoing and incoming paradigms.
             4. Estimate the approximate timeframe of the transition period.
+
+            **Step 5: Generate Supporting Evidence**
+            For each transition, briefly identify key historical evidence (events, innovations, publications, etc.) that mark or document this transition period.
+
+            **Step 6: Test Counter-Arguments**
+            For each transition, briefly address one alternative explanation for why the shift occurred, and why your analysis provides a more comprehensive understanding.
 
             Format your response as a JSON array of transition objects with these fields:
             - from_paradigm: Name of the earlier paradigm
             - to_paradigm: Name of the later paradigm
-            - trigger_factors: Description of key factors/events causing the shift (linked to dynamics)
+            - trigger_factors: Description of key factors/events causing the shift
             - core_tensions: Explanation of conflicts between the paradigms
             - transition_period: Approximate timeframe (e.g., "Late 1980s")
+            - key_evidence: Historical markers of this transition
+            - alternative_explanation: An alternative view of why this transition occurred
+            - explanation_defense: Why your analysis is more comprehensive
 
             Only respond with the JSON array.
             """
@@ -172,20 +201,35 @@ class ParadigmAnalyzer:
             Paradigm Transitions:
             {transitions}
 
-            **Step 1: Reflect on Patterns and Consequences**
-            Consider the historical evolution described by the paradigms and transitions. What recurring patterns emerge? Think about common pitfalls, successful adaptation strategies, the impact of ignoring anomalies, or the consequences of resisting change in this field. How do the core drivers/constraints influence these patterns?
+            **Step 1: Identify Core Constraints**
+            Consider what fundamental constraints (technological, economic, social, etc.) have consistently shaped the evolution of this field across multiple paradigm shifts.
 
-            **Step 2: Extract Key Lessons**
-            Based on your reflection, extract 5-7 key lessons learned from these historical shifts that are relevant for understanding the topic today and navigating future changes.
+            **Step 2: Consider Systemic Context**
+            Reflect on how broader system dynamics have influenced successful or failed transitions. What patterns emerge in how ecosystems evolve?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider how different stakeholder groups have repeatedly responded to paradigm shifts. Who typically drives change, who resists it, and why?
+
+            **Step 4: Identify Key Lessons**
+            Based on your reflections, extract 5-7 key lessons learned from these historical shifts that are relevant for understanding the topic today and navigating future changes.
             For each lesson:
             1. State the lesson clearly and concisely.
-            2. Provide a brief explanation (2-3 sentences) grounding the lesson in specific examples from the provided paradigms/transitions and linking it to the patterns identified in Step 1.
+            2. Provide a brief explanation (2-3 sentences) grounding the lesson in specific examples from the provided paradigms/transitions.
             3. Suggest how this lesson might apply to current or future challenges/opportunities related to the topic.
+
+            **Step 5: Generate Supporting Evidence**
+            For each lesson, briefly identify specific historical examples that best demonstrate or validate this lesson.
+
+            **Step 6: Test Counter-Arguments**
+            For each lesson, briefly address one potential argument that might challenge the validity or applicability of this lesson, and how you would respond to strengthen your point.
 
             Format your response as a JSON array of lesson objects with these fields:
             - lesson: Clear statement of the lesson
-            - explanation: Grounded explanation with historical examples and pattern links
+            - explanation: Grounded explanation with historical examples
             - relevance_today: How it applies now or in the future
+            - historical_examples: Specific examples supporting this lesson
+            - potential_challenge: A potential challenge to this lesson
+            - challenge_response: Your response to the challenge
 
             Only respond with the JSON array.
             """
@@ -204,23 +248,37 @@ class ParadigmAnalyzer:
             Historical Lessons:
             {lessons}
 
-            **Step 1: Reflect on Current Drivers and Disruptors**
-            Consider the current state of '{topic}', the historical lessons learned, and emerging trends (technological, economic, social, etc.). What are the most significant forces, tensions, or potential disruptions that could lead to a new paradigm shift? How might the core drivers/constraints evolve?
+            **Step 1: Identify Core Constraints**
+            Consider what fundamental constraints currently define the boundaries of '{topic}'. What technological, economic, or social limitations might be overcome next?
 
-            **Step 2: Project Future Paradigms**
-            Based on your reflection, project 2-4 plausible future paradigms for '{topic}'. These should represent distinct potential futures based on the drivers/disruptors identified.
+            **Step 2: Consider Systemic Context**
+            Reflect on the broader ecosystem trends affecting '{topic}'. What external forces are creating pressure for change?
+
+            **Step 3: Map Stakeholder Perspectives**
+            Consider the various stakeholder groups with interests in '{topic}'. What emerging needs or expectations might drive paradigm evolution?
+
+            **Step 4: Project Future Paradigms**
+            Based on your reflections, project 2-4 plausible future paradigms for '{topic}'. These should represent distinct potential futures based on the constraints and forces identified.
             For each projected paradigm:
             1. Provide a speculative but descriptive name.
-            2. Describe the core assumptions and characteristics of this potential future paradigm, linking it to the drivers/disruptors from Step 1.
+            2. Describe the core assumptions and characteristics of this potential future paradigm, linking it to the constraints and forces identified.
             3. Explain what key developments or events would need to occur for this paradigm to emerge.
             4. Discuss potential implications or consequences if this paradigm became dominant.
-            5. Suggest search terms to explore emerging signals or research related to this potential future.
+
+            **Step 5: Generate Supporting Evidence**
+            For each projected paradigm, briefly identify early signals or emerging trends that provide initial evidence this paradigm might be developing.
+
+            **Step 6: Test Counter-Arguments**
+            For each projection, briefly address one potential criticism about why this paradigm might not emerge as expected, and provide a reasoned response.
 
             Format your response as a JSON array of future paradigm objects with these fields:
             - name: Speculative name of the future paradigm
-            - description: Core assumptions/characteristics linked to drivers/disruptors
+            - description: Core assumptions/characteristics linked to constraints/forces
             - emergence_conditions: Key developments needed for it to arise
             - potential_implications: Consequences if dominant
+            - early_signals: Current trends or signals indicating movement in this direction
+            - potential_criticism: A potential criticism of this projection
+            - criticism_response: Your reasoned response to the criticism
             - search_terms: Terms to explore emerging signals
 
             Only respond with the JSON array.
