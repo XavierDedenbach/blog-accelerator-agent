@@ -8,6 +8,9 @@ import yaml
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple, List
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class YamlGuardError(Exception):
@@ -241,15 +244,17 @@ def get_current_stage(data: Dict[str, Any]) -> Optional[str]:
 
 def create_tracker_yaml(
     blog_title: str, 
-    version: int, 
+    version: int,
+    research_data: Dict[str, Any] = None,
     output_dir: str = "data/tracker_yaml"
 ) -> str:
     """
-    Create a new YAML tracker file for a blog.
+    Create a new YAML tracker file for a blog with enhanced research data statistics.
     
     Args:
         blog_title: Title of the blog
         version: Version number
+        research_data: Optional research data to include in the YAML
         output_dir: Directory to save the YAML file
         
     Returns:
@@ -282,6 +287,30 @@ def create_tracker_yaml(
             "timestamp": None
         }
     }
+    
+    # Add research data statistics if provided
+    if research_data:
+        data["research_data"] = {
+            "industry_analysis": {
+                "challenges_count": len(research_data.get('industry_analysis', {}).get('challenges', [])),
+                "sources_count": len(research_data.get('citations', [])),
+            },
+            "proposed_solution": {
+                "pro_arguments_count": len(research_data.get('proposed_solution', {}).get('pro_arguments', [])),
+                "counter_arguments_count": len(research_data.get('proposed_solution', {}).get('counter_arguments', [])),
+                "metrics_count": len(research_data.get('proposed_solution', {}).get('metrics', [])),
+                "visual_assets_count": len(research_data.get('visual_assets', [])),
+            },
+            "current_paradigm": {
+                "origin_year": research_data.get('current_paradigm', {}).get('origin_year'),
+                "alternatives_count": len(research_data.get('current_paradigm', {}).get('alternatives', [])),
+            },
+            "audience_analysis": {
+                "knowledge_gaps_count": len(research_data.get('audience_analysis', {}).get('knowledge_gaps', [])),
+                "acronyms_count": len(research_data.get('audience_analysis', {}).get('acronyms', [])),
+                "analogies_count": len(research_data.get('analogies', {}).get('generated_analogies', [])),
+            },
+        }
     
     # Save the YAML file
     save_yaml(yaml_path, data)

@@ -22,9 +22,14 @@ def mock_db_client():
         mock_blogs = MagicMock()
         mock_blogs.update_one.return_value = mock_update
         
+        # Setup research_data collection
+        mock_research_data = MagicMock()
+        mock_research_data.update_one.return_value = mock_update
+        
         # Setup db attribute and its collections attribute
         mock_db = MagicMock()
         mock_db.blogs = mock_blogs
+        mock_db.research_data = mock_research_data
         
         # Setup client instance
         client_instance = mock_client.return_value
@@ -33,6 +38,8 @@ def mock_db_client():
         # Setup store_review_result and store_media methods
         client_instance.store_review_result.return_value = "mock_report_id"
         client_instance.store_media.return_value = "mock_image_id"
+        client_instance.store_research_component.return_value = "mock_component_id"
+        client_instance.update_research_stats.return_value = True
         
         yield client_instance
 
@@ -465,7 +472,12 @@ def test_save_research_results(mock_db_client, mock_yaml_guard, mock_source_vali
         'test-blog', 2, 'research', report_markdown, 'test-blog_research_report_v2.md'
     )
     mock_db_client.store_media.assert_called_once()
-    mock_yaml_guard.assert_called_once_with('test-blog', 2)
+    
+    # Updated assertion to account for the research_data parameter
+    mock_yaml_guard.assert_called_once_with('test-blog', 2, research_data)
+    
+    # Verify that update_research_stats is called
+    mock_db_client.update_research_stats.assert_called_once()
     
     # Verify result
     assert result['status'] == 'success'

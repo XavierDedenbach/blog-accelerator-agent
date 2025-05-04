@@ -249,7 +249,8 @@ def test_get_current_stage(valid_yaml_data):
 def test_create_tracker_yaml():
     """Test creating a new YAML tracker file."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        yaml_path = create_tracker_yaml("test-blog", 1, temp_dir)
+        # Test without research data
+        yaml_path = create_tracker_yaml("test-blog", 1, output_dir=temp_dir)
         
         # Verify file was created
         assert os.path.exists(yaml_path)
@@ -260,6 +261,58 @@ def test_create_tracker_yaml():
         assert data["current_version"] == 1
         assert not data["review_pipeline"]["factual_review"]["complete"]
         assert not data["final_release"]["complete"]
+        assert "research_data" not in data
+        
+        # Test with research data
+        mock_research_data = {
+            "industry_analysis": {
+                "challenges": ["challenge1", "challenge2"]
+            },
+            "proposed_solution": {
+                "pro_arguments": ["pro1", "pro2"],
+                "counter_arguments": ["con1"],
+                "metrics": ["metric1"]
+            },
+            "current_paradigm": {
+                "origin_year": 2020,
+                "alternatives": ["alt1"]
+            },
+            "audience_analysis": {
+                "knowledge_gaps": ["gap1"],
+                "acronyms": ["acronym1", "acronym2"]
+            },
+            "analogies": {
+                "generated_analogies": ["analogy1"]
+            },
+            "citations": ["citation1", "citation2"],
+            "visual_assets": ["asset1", "asset2", "asset3"]
+        }
+        
+        yaml_path = create_tracker_yaml("test-blog-2", 1, mock_research_data, temp_dir)
+        
+        # Verify file was created
+        assert os.path.exists(yaml_path)
+        
+        # Verify content
+        data = load_yaml(yaml_path)
+        assert data["blog_title"] == "test-blog-2"
+        assert data["current_version"] == 1
+        assert not data["review_pipeline"]["factual_review"]["complete"]
+        assert not data["final_release"]["complete"]
+        
+        # Verify research data stats
+        assert "research_data" in data
+        assert data["research_data"]["industry_analysis"]["challenges_count"] == 2
+        assert data["research_data"]["industry_analysis"]["sources_count"] == 2
+        assert data["research_data"]["proposed_solution"]["pro_arguments_count"] == 2
+        assert data["research_data"]["proposed_solution"]["counter_arguments_count"] == 1
+        assert data["research_data"]["proposed_solution"]["metrics_count"] == 1
+        assert data["research_data"]["proposed_solution"]["visual_assets_count"] == 3
+        assert data["research_data"]["current_paradigm"]["origin_year"] == 2020
+        assert data["research_data"]["current_paradigm"]["alternatives_count"] == 1
+        assert data["research_data"]["audience_analysis"]["knowledge_gaps_count"] == 1
+        assert data["research_data"]["audience_analysis"]["acronyms_count"] == 2
+        assert data["research_data"]["audience_analysis"]["analogies_count"] == 1
 
 
 def test_get_review_status(temp_yaml_file, valid_yaml_data):

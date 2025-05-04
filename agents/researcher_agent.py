@@ -1336,7 +1336,7 @@ class ResearcherAgent:
         report_markdown: str
     ) -> Dict[str, Any]:
         """
-        Save research results to MongoDB.
+        Save research results to MongoDB with enhanced schema for sequential thinking artifacts.
         
         Args:
             blog_data: Blog data
@@ -1352,7 +1352,7 @@ class ResearcherAgent:
         version = metadata.get('version', 1)
         
         try:
-            # Store the blog content
+            # Store the blog content with enhanced metadata
             blog_doc = {
                 "title": blog_title,
                 "current_version": version,
@@ -1368,7 +1368,27 @@ class ResearcherAgent:
                             "grammar_review": {"complete": False, "result_file": None},
                             "final_release": {"complete": False}
                         },
-                        "readiness_score": readiness_score
+                        "readiness_score": readiness_score,
+                        # Enhanced schema for research statistics
+                        "research_stats": {
+                            "industry_analysis": {
+                                "challenges_count": len(research_data.get('industry_analysis', {}).get('challenges', [])),
+                                "sources_count": len(research_data.get('citations', [])),
+                            },
+                            "proposed_solution": {
+                                "pro_arguments_count": len(research_data.get('proposed_solution', {}).get('pro_arguments', [])),
+                                "counter_arguments_count": len(research_data.get('proposed_solution', {}).get('counter_arguments', [])),
+                                "visual_assets_count": len(research_data.get('visual_assets', [])),
+                            },
+                            "current_paradigm": {
+                                "alternatives_count": len(research_data.get('current_paradigm', {}).get('alternatives', [])),
+                            },
+                            "audience_analysis": {
+                                "knowledge_gaps_count": len(research_data.get('audience_analysis', {}).get('knowledge_gaps', [])),
+                                "acronyms_count": len(research_data.get('audience_analysis', {}).get('acronyms', [])),
+                                "analogies_count": len(research_data.get('analogies', {}).get('generated_analogies', [])),
+                            },
+                        }
                     }
                 ]
             }
@@ -1397,22 +1417,71 @@ class ResearcherAgent:
             )
             logger.info(f"Stored research report with ID: {report_id}")
             
-            # Store the research data
+            # Enhanced schema for research data with sequential thinking artifacts
+            enhanced_research_data = {
+                "blog_title": blog_title,
+                "version": version,
+                "data": research_data,
+                "sequential_thinking": {
+                    "constraints": research_data.get('constraints', []),
+                    "systemic_context": research_data.get('systemic_context', {}),
+                    "stakeholder_perspectives": research_data.get('stakeholder_perspectives', []),
+                    "challenges_solutions": {
+                        "industry_challenges": research_data.get('industry_analysis', {}).get('challenges', []),
+                        "proposed_solutions": research_data.get('proposed_solution', {})
+                    },
+                    "supporting_evidence": research_data.get('citations', []),
+                    "counter_arguments": research_data.get('proposed_solution', {}).get('counter_arguments', [])
+                },
+                "constraint_analysis": {
+                    "technical_constraints": research_data.get('constraints_analysis', {}).get('technical', []),
+                    "financial_constraints": research_data.get('constraints_analysis', {}).get('financial', []),
+                    "social_constraints": research_data.get('constraints_analysis', {}).get('social', []),
+                    "regulatory_constraints": research_data.get('constraints_analysis', {}).get('regulatory', [])
+                },
+                "readiness_score": readiness_score,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "version_history": [
+                    {
+                        "version": version,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "changes": "Initial research data"
+                    }
+                ]
+            }
+            
+            # Store the enhanced research data
             research_data_id = self.db_client.db.research_data.update_one(
                 {"blog_title": blog_title, "version": version},
-                {"$set": {
-                    "blog_title": blog_title,
-                    "version": version,
-                    "data": research_data,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }},
+                {"$set": enhanced_research_data},
                 upsert=True
             ).upserted_id
             
             if research_data_id:
-                logger.info(f"Stored research data with ID: {research_data_id}")
+                logger.info(f"Stored enhanced research data with ID: {research_data_id}")
             else:
                 logger.info(f"Updated existing research data for {blog_title} v{version}")
+                
+            # Update version history if this is an update
+            if not research_data_id:
+                self.db_client.db.research_data.update_one(
+                    {"blog_title": blog_title, "version": version},
+                    {"$push": {"version_history": {
+                        "version": version,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "changes": "Research data updated"
+                    }}}
+                )
+            
+            # Store individual research components for more efficient retrieval
+            for component_name, component_data in research_data.items():
+                if isinstance(component_data, dict) and component_data:
+                    self.db_client.store_research_component(
+                        blog_title,
+                        version,
+                        component_name,
+                        component_data
+                    )
             
             # Store the images
             image_ids = []
@@ -1430,8 +1499,10 @@ class ResearcherAgent:
             
             logger.info(f"Stored {len(image_ids)} blog images")
             
-            # Store visual assets from analogies
+            # Store visual assets from research
             visual_asset_ids = []
+            
+            # Store visual assets from analogies
             for analogy in research_data.get('analogies', {}).get('generated_analogies', []):
                 visual = analogy.get('visual', {})
                 assets = visual.get('assets', [])
@@ -1444,15 +1515,37 @@ class ResearcherAgent:
                         "firecrawl",
                         asset.get('url'),
                         asset.get('base64'),
-                        f"Visual for {analogy.get('title', 'analogy')}"
+                        f"Visual for {analogy.get('title', 'analogy')}",
+                        "analogy"
                     )
                     visual_asset_ids.append(asset_id)
+            
+            # Store visual assets from solution and paradigm
+            for asset in research_data.get('visual_assets', []):
+                asset_id = self.db_client.store_media(
+                    blog_title,
+                    version,
+                    asset.get('format', 'image'),
+                    asset.get('source', 'firecrawl'),
+                    asset.get('url'),
+                    asset.get('base64'),
+                    asset.get('alt_text', 'Visual asset'),
+                    asset.get('category', 'solution')
+                )
+                visual_asset_ids.append(asset_id)
             
             logger.info(f"Stored {len(visual_asset_ids)} visual assets")
             
             # Create YAML tracker
-            yaml_path = create_tracker_yaml(blog_title, version)
+            yaml_path = create_tracker_yaml(blog_title, version, research_data)
             logger.info(f"Created YAML tracker: {yaml_path}")
+            
+            # Update research stats in blog document
+            self.db_client.update_research_stats(
+                blog_title,
+                version,
+                blog_doc["versions"][0]["research_stats"]
+            )
             
             return {
                 "status": "success",
@@ -1460,6 +1553,7 @@ class ResearcherAgent:
                 "version": version,
                 "readiness_score": readiness_score,
                 "report_id": report_id,
+                "research_data_id": str(research_data_id) if research_data_id else None,
                 "image_ids": image_ids,
                 "visual_asset_ids": visual_asset_ids,
                 "yaml_path": yaml_path
@@ -1725,9 +1819,9 @@ class ResearcherAgent:
                 }
                 
                 self._log_to_opik("Result saving complete", "result_saving_complete", {
-                })
                     "blog_id": result.get('blog_id'),
                     'report_id': result.get('report_id')
+                })
             except Exception as e:
                 error_msg = f"Error saving results: {e}"
                 logger.error(error_msg)
