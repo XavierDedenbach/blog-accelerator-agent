@@ -1,0 +1,136 @@
+/* Basic Reset & Font */
+body {
+    font-family: sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    background-color: #f8f9fa;
+    color: #333;
+}
+
+header {
+    background-color: #343a40;
+    color: #fff;
+    padding: 1rem 2rem;
+    border-bottom: 3px solid #007bff;
+}
+
+h1 {
+    margin: 0 0 1rem 0;
+    font-size: 1.8em;
+}
+
+main {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 2rem auto;
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+}
+
+/* Controls Section */
+.controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+    background-color: #e9ecef;
+    border-radius: 4px;
+}
+
+.filters span {
+    margin-right: 0.5rem;
+    font-weight: bold;
+}
+
+.filters button {
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    padding: 0.4rem 0.8rem;
+    margin: 0 0.2rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.filters button:hover {
+    background-color: #5a6268;
+}
+
+.filters button.active {
+    background-color: #007bff;
+    font-weight: bold;
+}
+
+.search input[type="text"] {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    min-width: 250px;
+}
+
+/* Report Content Sections */
+section {
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background-color: #fff;
+}
+
+section h2 {
+    margin-top: 0;
+    color: #007bff;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 0.5rem;
+}
+
+/* Hide sections by default (JS will show them) */
+section.hidden {
+    display: none;
+}
+
+/* Highlight for Search */
+.highlight {
+    background-color: yellow;
+    font-weight: bold;
+}
+
+/* Error Message */
+.error {
+    color: #dc3545;
+    font-weight: bold;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .filters {
+        margin-bottom: 0.5rem;
+        text-align: center;
+    }
+    .search input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+    }
+    main {
+        padding: 1rem;
+        margin: 1rem;
+    }
+}
+
+pre {
+    background-color: #f1f1f1;
+    border: 1px solid #ddd;
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap; /* Allows text wrapping */
+    word-wrap: break-word; /* Ensures long words break */
+} 

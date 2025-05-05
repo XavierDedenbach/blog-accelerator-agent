@@ -8,6 +8,7 @@ from collections import deque
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from agents.researcher_agent import ResearcherAgent
+import webbrowser # Added for opening browser
 
 # Configure logging
 logging.basicConfig(
@@ -321,62 +322,81 @@ class RateLimitedResearcherAgent(ResearcherAgent):
 
 async def main():
     # Get environment variables
-    mongodb_uri = os.getenv("MONGODB_URI")
-    brave_api_key = os.getenv("BRAVE_API_KEY")
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-    firecrawl_server = os.getenv("FIRECRAWL_SERVER")
-    opik_server = os.getenv("OPIK_SERVER")
+    mongodb_uri = os.environ.get("MONGODB_URI")
+    brave_api_key = os.environ.get("BRAVE_API_KEY")
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    groq_api_key = os.environ.get("GROQ_API_KEY")
+    firecrawl_server = os.environ.get("FIRECRAWL_SERVER")
+    opik_server = os.environ.get("OPIK_SERVER")
+    openrouter_api_key = os.environ.get('OPENROUTER_API_KEY')
     
-    # Print loaded API keys (without revealing full keys)
-    print(f"MongoDB URI: {mongodb_uri}")
-    print(f"Brave API Key: {brave_api_key[:5]}..." if brave_api_key else "Brave API Key: None")
-    print(f"OpenAI API Key: {openai_api_key[:5]}..." if openai_api_key else "OpenAI API Key: None")
-    print(f"Groq API Key: {groq_api_key[:5]}..." if groq_api_key else "Groq API Key: None")
-    print(f"OpenRouter API Key: {openrouter_api_key[:5]}..." if openrouter_api_key else "OpenRouter API Key: None")
-    print(f"Firecrawl Server: {firecrawl_server}")
-    print(f"Opik Server: {opik_server}")
+    # Check if essential variables are set
+    if not mongodb_uri:
+        logger.error("MONGODB_URI environment variable is not set.")
+        return
+        
+    if not brave_api_key:
+        logger.warning("BRAVE_API_KEY not set, citation search will use fallback data.")
+        
+    if not openai_api_key and not groq_api_key and not openrouter_api_key:
+        logger.error("No LLM API key provided (OpenAI, Groq, or OpenRouter).")
+        return
     
-    # Inform about rate limiting
-    print("\nRate limiting enabled:")
-    print("API Rate Limiting:")
-    print("- OpenAI API: 3 calls per second (primary)")
-    print("- OpenRouter API: 5 calls per second (fallback)")
-    print("- Brave Search API: 2 calls per second (conservative rate)")
-    
-    # Initialize the rate-limited agent
-    agent = RateLimitedResearcherAgent(
-        mongodb_uri=mongodb_uri,
-        brave_api_key=brave_api_key,
-        openai_api_key=openai_api_key,
-        groq_api_key=groq_api_key,
-        firecrawl_server=firecrawl_server,
-        opik_server=opik_server
-    )
-    
-    # Get file path from command line argument
+    # Get file path from command line arguments
     if len(sys.argv) < 2:
-        print("\nUsage: python run_researcher_with_env.py <path_to_blog_file>")
+        logger.error("Usage: python run_researcher_with_env.py <path_to_markdown_or_zip>")
         return
     
     file_path = sys.argv[1]
-    print(f"\nProcessing blog file: {file_path}")
-    print("This might take some time due to rate limiting...")
-    print("If OpenAI API rate limits are reached, the system will automatically fallback to OpenRouter.")
     
-    # Process the blog
+    logger.info(f"Processing file: {file_path}")
+    
+    # Initialize DB client
+    from agents.utilities.db import MongoDBClient
+    db_client = MongoDBClient(uri=mongodb_uri)
+    
+    # Initialize the enhanced, rate-limited agent
+    agent = RateLimitedResearcherAgent(
+        db_client=db_client,
+        brave_api_key=brave_api_key,
+        opik_server=opik_server,
+        firecrawl_server=firecrawl_server,
+        openai_api_key=openai_api_key,
+        groq_api_key=groq_api_key,
+        openrouter_api_key=openrouter_api_key
+    )
+    
+    # Run the process_blog method asynchronously
     try:
-        start_time = time.time()
+        start_process_time = time.time()
         result = await agent.process_blog(file_path)
+        end_process_time = time.time()
         
-        # Calculate and display processing time
-        elapsed_time = time.time() - start_time
-        print(f"\nProcessing completed in {elapsed_time:.2f} seconds")
-        
+        logger.info("--- Processing Result ---")
         print(json.dumps(result, indent=2))
+        logger.info(f"Total processing time: {end_process_time - start_process_time:.2f} seconds")
+        
+        # Check if successful and open the report URL
+        if result.get('status') == 'success' and result.get('report_url'):
+            report_url = result['report_url']
+            logger.info(f"Attempting to open report URL in browser: {report_url}")
+            try:
+                opened = webbrowser.open(report_url)
+                if opened:
+                    logger.info("Successfully requested browser to open report URL.")
+                else:
+                    logger.warning("Could not automatically open browser. Please open the URL manually.")
+                    print(f"\nReport URL: {report_url}")
+            except Exception as browser_err:
+                logger.error(f"Error opening browser: {browser_err}")
+                print(f"\nReport URL: {report_url}")
+        elif result.get('status') == 'error':
+            logger.error(f"Processing failed: {result.get('error')}")
+        else:
+            logger.warning("Processing completed but no report URL found in result.")
+            
     except Exception as e:
-        print(f"Error processing blog: {e}")
+        logger.error(f"An unexpected error occurred during processing: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main()) # Run the async main function 
