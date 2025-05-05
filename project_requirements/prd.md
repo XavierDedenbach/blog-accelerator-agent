@@ -228,15 +228,16 @@ CMD ["python", "main.py"]
 
 ### Research Report Web Viewer
 
-* **Auto-opening browser view** of research results
-* Clean, responsive UI for reading comprehensive research reports
-* Collapsible sections for easy navigation of lengthy content
-* Visual indicators for readiness scores
-* Embedded media viewer for visual assets
-* Search and filter capabilities for large reports
-* Shareable URLs for team collaboration
+*   **Auto-opening browser view** of research results upon completion.
+*   A dedicated `FastAPI` endpoint (e.g., `/reports/view/{blog_title}/{version}`) serves the report.
+*   Server-side rendering using `Jinja2` templates to generate clean, responsive HTML.
+*   Retrieves research data directly from `MongoDB` to populate the report view.
+*   Clean, responsive UI for reading comprehensive research reports, styled with CSS.
+*   Features include collapsible sections for navigation, visual indicators for readiness scores, and an embedded media viewer for visual assets.
+*   Client-side JavaScript implements **category-based filtering** (Audience, Solution, Industry, Paradigm, Visuals, Analogies) and search capabilities for navigating large reports efficiently.
+*   The main research script uses the `webbrowser` module to launch the report URL automatically.
 
-This feature enhances usability by automatically opening completed research in a browser tab for immediate review, rather than requiring users to navigate MongoDB directly.
+This feature enhances usability by automatically presenting completed research in a browser tab, eliminating the need for users to manually locate files or navigate databases.
 
 ---
 

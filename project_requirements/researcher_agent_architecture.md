@@ -8,14 +8,14 @@ The Researcher Agent is a sophisticated component of the Blog Accelerator that a
 graph TD
     subgraph Blog Accelerator System
         A[User Proposes Opinionated Concept] --> B[Researcher Agent]
-        B --> C[Research Report]
+        B --> C[Research Report Stored in DB]
         C --> D[User Writes Blog Post]
         D --> E[Review Agent]
         E --> F[User Reviews Feedback]
         F --> G[User Releases Blog]
     end
     
-    subgraph ResearcherAgent Components
+    subgraph ResearcherAgent Process
         B --> H[Topic Validation & Planning]
         H --> I1[Industry/System Analysis]
         H --> I2[Proposed Solution Analysis]
@@ -26,6 +26,8 @@ graph TD
         J & K --> L[Research Integration]
         L --> M[Calculate Readiness Score]
         M --> N[Generate Final Markdown Report]
+        N --> O[Store Report in MongoDB]
+        O --> P[Open Report in Browser]
     end
 ```
 
@@ -161,6 +163,7 @@ This approach ensures that research output has greater depth and considers more 
 ```mermaid
 sequenceDiagram
     participant User
+    participant RunnerScript
     participant ResearcherAgent
     participant IndustryAnalyzer
     participant SolutionAnalyzer
@@ -169,8 +172,10 @@ sequenceDiagram
     participant VisualAssetCollector
     participant AnalogyGenerator
     participant MongoDB
+    participant WebBrowser
     
-    User->>ResearcherAgent: Submit opinionated topic
+    User->>RunnerScript: Run researcher agent for topic
+    RunnerScript->>ResearcherAgent: Process topic
     ResearcherAgent->>ResearcherAgent: Validate topic requirements
     ResearcherAgent->>ResearcherAgent: Break down into subtopics
     
@@ -197,9 +202,11 @@ sequenceDiagram
     
     ResearcherAgent->>ResearcherAgent: Calculate readiness score
     ResearcherAgent->>ResearcherAgent: Generate research report
-    ResearcherAgent->>MongoDB: Save research results
+    ResearcherAgent->>MongoDB: Save research results (report + data)
     
-    ResearcherAgent-->>User: Return research report
+    ResearcherAgent-->>RunnerScript: Return result summary (including report URL)
+    RunnerScript->>WebBrowser: Open report URL
+    WebBrowser-->>User: Display Research Report
 ```
 
 ## Readiness Score Calculation

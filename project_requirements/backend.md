@@ -199,24 +199,41 @@ Includes a reference to an asset folder containing the markdown file and any ima
 
 ---
 
-## Web UI for Research Reports
+## 7. Web UI for Research Reports
 
-* **Server-Side Rendering**: Simple HTML/template-based UI rendering
-* **Auto-Launch**: Browser tab opens automatically when research completes
-* **Data Flow**:
-  1. Python web server endpoint serves HTML/CSS/JS
-  2. Client-side JS loads report data via REST API
-  3. Data is formatted and displayed with proper styling
-* **Implementation Options**:
-  * FastAPI serving Jinja templates (recommended)
-  * Simple Flask app for report viewing only
-  * Static HTML with JavaScript for API calls
-* **Browser Integration**:
-  * Use `webbrowser` Python module to open URL
-  * Fallback to displaying URL if browser launch fails
-* **Security Considerations**:
-  * Local-only by default (localhost)
-  * Optional basic auth for team sharing
+### API Endpoint
+
+*   **Endpoint:** `/reports/view/{blog_title}/{version}`
+*   **Method:** `GET`
+*   **Description:** Serves the HTML page for viewing a specific research report.
+*   **Logic:**
+    *   Retrieves the research data (or pre-generated report markdown) for the specified `blog_title` and `version` from MongoDB.
+    *   Renders an HTML template (e.g., using Jinja2) with the research data.
+    *   Returns the rendered HTML page.
+
+### Browser Integration
+
+*   **Mechanism:** The script that initiates the research process (e.g., `run_researcher_with_env.py` or the main block in `agents/researcher_agent.py`) will use the standard Python `webbrowser` module.
+*   **Workflow:**
+    1.  After the `ResearcherAgent` successfully completes the `process_blog` method and saves the results, it returns a dictionary containing the status and the URL for the generated report (e.g., `http://localhost:8080/reports/view/your-blog-title/1`).
+    2.  The calling script receives this result.
+    3.  If the status is successful and a report URL is provided, the script calls `webbrowser.open(report_url)`.
+    4.  This command attempts to open the user's default web browser to the specified URL.
+*   **Fallback:** If `webbrowser.open()` fails (e.g., in a headless environment), the script should log the report URL to the console so the user can open it manually.
+
+### Template Engine
+
+*   `Jinja2` is recommended for templating due to its seamless integration with `FastAPI`.
+*   Templates will reside in a `templates` directory.
+*   CSS and **client-side JavaScript** files will be served as static assets by FastAPI.
+*   The JavaScript will handle:
+    *   **Filtering** the displayed report content based on user selections (e.g., showing only 'Audience Analysis' or 'Solution Analysis' sections) without requiring page reloads.
+    *   Implementing a **client-side keyword search bar** to filter content textually within the browser and highlight matches.
+
+### Security
+
+*   The report viewing endpoint should initially be accessible only locally.
+*   If deployed publicly, appropriate authentication (e.g., checking user session or JWT) should be added to protect access to potentially sensitive research data.
 
 ---
 
