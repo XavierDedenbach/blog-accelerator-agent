@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Research Report: {{ blog_title }} - v{{ version }}</title>
+    <!-- Link to CSS file (will be created later) -->
+    <link rel="stylesheet" href="/static/report_styles.css">
+</head>
+<body>
+    <h1>Research Report: {{ blog_title }} (v{{ version }})</h1>
+    
+    <div class="controls">
+        <!-- Filter buttons will go here -->
+        <div class="filters">
+            <button data-filter="all">All</button>
+            <button data-filter="audience">Audience</button>
+            <button data-filter="solution">Solution</button>
+            <button data-filter="industry">Industry</button>
+            <button data-filter="paradigm">Paradigm</button>
+            <button data-filter="visuals">Visuals</button>
+            <button data-filter="analogies">Analogies</button>
+            <button data-filter="citations">Citations</button>
+        </div>
+        <!-- Search bar will go here -->
+        <div class="search">
+            <input type="text" id="search-input" placeholder="Search report...">
+        </div>
+    </div>
+    
+    <div id="report-content">
+        {% if report_markdown %}
+            <!-- Render pre-generated Markdown (needs a JS Markdown parser or backend conversion) -->
+            <pre>{{ report_markdown }}</pre>  <!-- Simple pre for now -->
+            <p><em>Note: Markdown rendering will be implemented later.</em></p>
+        {% elif research_data %}
+            <!-- Placeholder for rendering structured research_data -->
+            <h2>Raw Research Data (Structure Placeholder)</h2>
+            <pre>{{ research_data | tojson(indent=2) }}</pre>
+            <p><em>Note: Detailed rendering from research data will be implemented later.</em></p>
+        {% else %}
+            <p>Error: No report data available to display.</p>
+        {% endif %}
+    </div>
+
+    <!-- Link to JS file (will be created later) -->
+    <script src="/static/report_viewer.js"></script>
+</body>
+</html> 

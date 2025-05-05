@@ -24,3 +24,4 @@ langchain-anthropic==0.0.1
 langchain-groq==0.0.1
 langchain-openrouter==0.0.1
 python-multipart==0.0.11
+jinja2>=3.0.0

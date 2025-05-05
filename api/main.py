@@ -6,18 +6,21 @@ This module:
 2. Registers API routes
 3. Configures middleware
 4. Provides health check endpoint
+5. Configures static files and templates for the report viewer
 """
 
 import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Import route modules (will add these later)
-from api.endpoints import process, review
+# Import route modules
+from api.endpoints import process, review, reports  # Added reports
 
 # Create FastAPI app
 app = FastAPI(
@@ -34,6 +37,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Configure static files (for CSS, JS)
+# Assuming a 'static' directory exists at the root
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Configure templates (shared instance, although endpoints might define their own)
+# Base templates are in the 'templates' directory
+templates = Jinja2Templates(directory="templates")
+
 
 # Health check endpoint
 @app.get("/health", tags=["Health"])
@@ -53,6 +65,7 @@ async def health_check():
 # Register routes
 app.include_router(process.router, prefix="/process", tags=["Process"])
 app.include_router(review.router, prefix="/review", tags=["Review"])
+app.include_router(reports.router, prefix="/reports", tags=["Reports"]) # Added reports router
 
 # Startup event
 @app.on_event("startup")
@@ -60,7 +73,12 @@ async def startup_event():
     """
     Execute tasks on application startup.
     Verify environment variables and connections.
+    Create static/template directories if they don't exist.
     """
+    # Create required directories if they don't exist
+    os.makedirs("static", exist_ok=True)
+    os.makedirs("templates", exist_ok=True)
+    
     required_vars = [
         "MONGODB_URI"
     ]
@@ -73,7 +91,6 @@ async def startup_event():
     
     # Additional startup tasks could include:
     # - Verifying MongoDB connection
-    # - Creating required directories
     
     print("Blog Accelerator API started successfully")
 
