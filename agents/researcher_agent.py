@@ -2145,18 +2145,18 @@ class ResearcherAgent:
             process_progress['stages']['file_processing']['status'] = 'in_progress'
             process_progress['stages']['file_processing']['started_at'] = datetime.now().isoformat()
             
-            try:
-                # Check if the file is a ZIP or markdown
-                if file_path.lower().endswith('.zip'):
-                    # Process ZIP archive
-                    logger.info(f"Processing ZIP archive: {file_path}")
-                    blog_data = process_blog_upload(file_path)
-                    logger.info(f"ZIP processing complete with {len(blog_data.get('images', []))} images")
-                else:
-                    # Process markdown file
-                    logger.info(f"Processing markdown file: {file_path}")
-                    blog_data = self.process_markdown_file(file_path)
-                    logger.info(f"Markdown processing complete with {len(blog_data.get('images', []))} images")
+        try:
+            # Check if the file is a ZIP or markdown
+            if file_path.lower().endswith('.zip'):
+                # Process ZIP archive
+                logger.info(f"Processing ZIP archive: {file_path}")
+                blog_data = process_blog_upload(file_path)
+                logger.info(f"ZIP processing complete with {len(blog_data.get('images', []))} images")
+            else:
+                # Process markdown file
+                logger.info(f"Processing markdown file: {file_path}")
+                blog_data = self.process_markdown_file(file_path)
+                logger.info(f"Markdown processing complete with {len(blog_data.get('images', []))} images")
                 
                 # Mark file processing as complete
                 process_progress['stages']['file_processing']['status'] = 'complete'
@@ -2367,7 +2367,7 @@ class ResearcherAgent:
                 process_progress['stages']['result_saving']['completed_at'] = datetime.now().isoformat()
                 process_progress['stages']['result_saving']['errors'].append(str(e))
                 self._log_to_opik("Result saving error", "result_saving_error", {"error": str(e)})
-                raise
+            raise
             
             # Update overall progress
             # Update overall progress
