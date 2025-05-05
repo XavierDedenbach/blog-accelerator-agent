@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
+import asyncio
 
 from langchain.callbacks.manager import CallbackManagerForChainRun
 from langchain.chains.llm import LLMChain
@@ -535,30 +536,43 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             logger.info(f"Searching for existing analogies for concept: {concept}")
             existing_analogies = await self.search_existing_analogies(concept)
             
-            # Process each analogy (evaluate, refine if needed, add visuals)
-            processed_analogies = []
+            # Evaluate and refine analogies
+            evaluated_analogies = []
+            refined_analogies = []
+            
             for analogy in initial_analogies:
-                # Evaluate the analogy
-                logger.info(f"Evaluating analogy: {analogy.get('title', 'Untitled')}")
-                evaluation = await self.evaluate_analogy(concept, analogy)
-                
-                refined_analogy = analogy
-                # Refine if score is below threshold
-                if evaluation.get('overall_score', 0) < refinement_threshold:
-                    logger.info(f"Refining analogy: {analogy.get('title', 'Untitled')} - Score: {evaluation.get('overall_score', 0)}")
-                    refined_analogy = await self.refine_analogy(concept, analogy, evaluation)
-                
-                # Generate visual representation
-                logger.info(f"Generating visual for analogy: {refined_analogy.get('title', 'Untitled')}")
-                visual = await self.generate_visual_representation(refined_analogy)
-                
-                # Add to processed analogies
-                processed_analogy = {
-                    **refined_analogy,
-                    "evaluation": evaluation,
-                    "visual": visual
-                }
-                processed_analogies.append(processed_analogy)
+                logger.info(f"Evaluating analogy: {analogy.get('title', '')}")
+                try:
+                    evaluation = await self.evaluate_analogy(concept, analogy)
+                    
+                    # Ensure evaluation and score exist and are floats before comparison
+                    overall_score = evaluation.get('overall_score')
+                    if isinstance(overall_score, (int, float)):
+                        logger.info(f"Evaluated analogy: {analogy.get('title', '')} - Score: {overall_score:.1f}/10")
+                        evaluated_analogy = {**analogy, "evaluation": evaluation}
+                        evaluated_analogies.append(evaluated_analogy)
+                        
+                        # Refine if below threshold
+                        if overall_score < refinement_threshold:
+                            logger.info(f"Refining analogy: {analogy.get('title', '')} (Score: {overall_score:.1f})")
+                            refined_analogy = await self.refine_analogy(concept, analogy, evaluation)
+                            refined_analogies.append(refined_analogy)
+                        else:
+                            # Keep the original if score is good enough
+                            refined_analogies.append(evaluated_analogy) # Add the evaluated version
+                    else:
+                        logger.warning(f"Could not evaluate analogy '{analogy.get('title', '')}' properly, score missing or invalid. Skipping.")
+                        # Optionally keep the original unevaluated analogy
+                        # refined_analogies.append(analogy) 
+                        
+                except Exception as e:
+                     logger.error(f"Error evaluating or refining analogy '{analogy.get('title', '')}': {e}")
+                     # Optionally keep the original unevaluated analogy
+                     # refined_analogies.append(analogy) 
+
+            # Generate visual representations
+            logger.info(f"Generating visual representations for {len(refined_analogies)} refined analogies")
+            visual_representations = await asyncio.gather(*[self.generate_visual_representation(a) for a in refined_analogies])
             
             # Calculate statistics
             end_time = datetime.now()
@@ -567,13 +581,13 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             # Create result
             result = {
                 "concept": concept,
-                "generated_analogies": processed_analogies,
+                "generated_analogies": evaluated_analogies + refined_analogies,
                 "existing_analogies": existing_analogies,
                 "stats": {
-                    "generated_count": len(processed_analogies),
+                    "generated_count": len(evaluated_analogies) + len(refined_analogies),
                     "existing_count": len(existing_analogies),
-                    "visual_assets_count": sum(len(a.get("visual", {}).get("assets", [])) for a in processed_analogies),
-                    "average_score": sum(a.get("evaluation", {}).get("overall_score", 0) for a in processed_analogies) / max(len(processed_analogies), 1),
+                    "visual_assets_count": sum(len(a.get("visual", {}).get("assets", [])) for a in evaluated_analogies + refined_analogies),
+                    "average_score": sum(a.get("evaluation", {}).get("overall_score", 0) for a in evaluated_analogies + refined_analogies) / max(len(evaluated_analogies + refined_analogies), 1),
                     "generation_duration_seconds": duration,
                     "timestamp": datetime.now().isoformat()
                 }
@@ -581,7 +595,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             
             logger.info(
                 f"Completed analogy generation for {concept} with "
-                f"{len(processed_analogies)} analogies"
+                f"{len(evaluated_analogies) + len(refined_analogies)} analogies"
             )
             
             return result

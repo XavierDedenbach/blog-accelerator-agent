@@ -367,17 +367,23 @@ async def main():
     )
     
     # Run the process_blog method asynchronously
+    result = None # Initialize result to None
     try:
         start_process_time = time.time()
         result = await agent.process_blog(file_path)
         end_process_time = time.time()
         
         logger.info("--- Processing Result ---")
-        print(json.dumps(result, indent=2))
+        # Print result only if it's not None
+        if result:
+            print(json.dumps(result, indent=2))
+        else:
+            print("Processing finished, but no result dictionary was returned (check logs for errors).")
+            
         logger.info(f"Total processing time: {end_process_time - start_process_time:.2f} seconds")
         
-        # Check if successful and open the report URL
-        if result.get('status') == 'success' and result.get('report_url'):
+        # Check if successful and open the report URL (MOVED INSIDE TRY BLOCK)
+        if result and result.get('status') == 'success' and result.get('report_url'):
             report_url = result['report_url']
             logger.info(f"Attempting to open report URL in browser: {report_url}")
             try:
@@ -390,13 +396,27 @@ async def main():
             except Exception as browser_err:
                 logger.error(f"Error opening browser: {browser_err}")
                 print(f"\nReport URL: {report_url}")
-        elif result.get('status') == 'error':
+        elif result and result.get('status') == 'error':
             logger.error(f"Processing failed: {result.get('error')}")
-        else:
-            logger.warning("Processing completed but no report URL found in result.")
+        elif result:
+            logger.warning("Processing completed but no report URL found or status not 'success'.")
             
     except Exception as e:
-        logger.error(f"An unexpected error occurred during processing: {e}", exc_info=True)
+        logger.error(f"Error processing blog: {e}")
+        # --- ADDED FALLBACK LOGGING ---
+        # Check if the error happened *during* processing and if agent has partial data
+        if 'agent' in locals() and hasattr(agent, 'research_data') and agent.research_data:
+            try:
+                research_data_json = json.dumps(agent.research_data, indent=2, default=str) # Use default=str for non-serializable types
+                logger.info(f"--- Fallback Research Data Dump (due to error) ---")
+                logger.info(research_data_json)
+                logger.info(f"--- End Fallback Research Data Dump ---")
+            except Exception as dump_error:
+                logger.error(f"Failed to dump research data to logs: {dump_error}")
+        # --- END FALLBACK LOGGING ---
+        result = None # Ensure result is None if an exception occurs
+
+    # --- Processing Result ---
 
 if __name__ == "__main__":
     asyncio.run(main()) # Run the async main function 

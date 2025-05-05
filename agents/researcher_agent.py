@@ -298,8 +298,10 @@ class ResearcherAgent:
             # Check if we have the required dependencies
             if self.firecrawl_client:
                 self.visual_asset_collector = VisualAssetCollector(
-            firecrawl_client=self.firecrawl_client
-        )
+                    openai_api_key=self.openai_api_key, # Pass the OpenAI key
+                    firecrawl_client=self.firecrawl_client,
+                    source_validator=self.source_validator # Also pass validator if needed by VAC
+                )
                 logger.info("Initialized VisualAssetCollector")
             else:
                 logger.warning("Skipping VisualAssetCollector initialization (missing Firecrawl client)")
@@ -566,108 +568,276 @@ class ResearcherAgent:
         
         # Task 2: Industry Analysis (already async)
         async def industry_task():
+            industry_analysis = None # Initialize to None
             try:
                 if hasattr(self, 'industry_analyzer') and self.industry_analyzer:
                     industry_analysis = await self.industry_analyzer.analyze_industry(metadata.get('main_topic', ''))
-                    research_data['industry_analysis'] = industry_analysis # Store full analysis
-                    research_data['challenges'] = industry_analysis.get('challenges', [])
-                    research_data['system_affected'] = {
-                        'name': metadata.get('main_topic'),
-                        'description': industry_analysis.get('description', ''),
-                        'challenges': industry_analysis.get('challenges', []) # Redundant, but for compatibility
-                    }
-                    progress['completed_components'].append('industry_analysis')
-                    progress['pending_components'].remove('industry_analysis')
-                    logger.info("Async Industry analysis completed")
-                    self._log_to_opik("Async Industry analysis complete", "industry_analysis_complete", {"challenges_count": len(research_data['challenges'])})
+                    # Log success inside try block, before finally
+                    if industry_analysis:
+                         logger.info("Async Industry analysis completed successfully")
+                         self._log_to_opik("Async Industry analysis complete", "industry_analysis_complete", {"challenges_count": len(industry_analysis.get('challenges', []))})
                 else:
                      logger.warning("Industry analyzer not available, skipping")
+                     # Explicitly remove from pending if skipped
+                     if 'industry_analysis' in progress['pending_components']:
+                         progress['pending_components'].remove('industry_analysis')
+
             except Exception as e:
                 error_msg = f"Error in industry analysis: {e}"
                 logger.error(error_msg)
                 progress['errors'].append({'component': 'industry_analysis', 'error': str(e)})
                 self._log_to_opik("Async Industry analysis error", "industry_analysis_error", {"error": str(e)})
+                # Explicitly remove from pending if error occurs
+                if 'industry_analysis' in progress['pending_components']:
+                    progress['pending_components'].remove('industry_analysis')
+            finally: # Ensure system_affected is always set, even if analysis fails or is skipped
+                research_data['industry_analysis'] = industry_analysis # Store result (or None)
+                research_data['challenges'] = industry_analysis.get('challenges', []) if industry_analysis else []
+                # Safely initialize system_affected dictionary
+                research_data['system_affected'] = {
+                    'name': metadata.get('main_topic'),
+                    'description': industry_analysis.get('description', 'Industry analysis skipped or failed') if industry_analysis else 'Industry analysis skipped or failed',
+                    'challenges': industry_analysis.get('challenges', []) if industry_analysis else []
+                }
+                # Update progress lists only if component was actually processed
+                if industry_analysis and 'industry_analysis' in progress['pending_components']: # Check if it was processed and still pending
+                    progress['completed_components'].append('industry_analysis')
+                    progress['pending_components'].remove('industry_analysis')
+                elif not industry_analysis and 'industry_analysis' not in progress['errors'] and 'industry_analysis' in progress['pending_components']:
+                     # If skipped without error, remove from pending
+                     progress['pending_components'].remove('industry_analysis')
+
         if hasattr(self, 'industry_analyzer') and self.industry_analyzer: # Only add task if analyzer exists
            tasks.append(industry_task())
         else: # Mark as skipped if not available
-             progress['pending_components'].remove('industry_analysis')
+             if 'industry_analysis' in progress['pending_components']:
+                 progress['pending_components'].remove('industry_analysis')
 
         # Task 3: Solution Analysis (already async)
         async def solution_task():
+            solution_analysis = None # Initialize to None
             try:
                 if hasattr(self, 'solution_analyzer') and self.solution_analyzer:
                      # Wait for challenges data if possible (simple approach for now)
-                    await asyncio.sleep(0.1) # Small delay to allow challenges to potentially populate
-                    solution_analysis = await self.solution_analyzer.analyze_solution(
-                        metadata.get('main_topic', ''), 
-                        metadata.get('proposed_solution_name', 'Proposed Solution'), # Need a way to get solution name
-                        research_data.get('challenges', []) # Use potentially populated challenges
-                    )
-                    research_data['solution'] = solution_analysis
-                    research_data['proposed_solution'] = { # For compatibility
-                         'name': solution_analysis.get('solution', 'Proposed Solution'),
-                         'advantages': solution_analysis.get('pro_arguments', []),
-                         'limitations': solution_analysis.get('counter_arguments', [])
-                    }
-                    progress['completed_components'].append('solution_analysis')
-                    progress['pending_components'].remove('solution_analysis')
-                    logger.info("Async Solution analysis completed")
-                    self._log_to_opik("Async Solution analysis complete", "solution_analysis_complete", {})
+                     # await asyncio.sleep(0.1) # Small delay might not be necessary if gather runs all tasks
+                     solution_analysis = await self.solution_analyzer.analyze_solution(
+                         metadata.get('main_topic', ''),
+                         metadata.get('proposed_solution_name', 'Proposed Solution'), # Need a way to get solution name
+                         research_data.get('challenges', []) # Use potentially populated challenges
+                     )
+                     if solution_analysis:
+                         logger.info("Async Solution analysis completed successfully")
+                         self._log_to_opik("Async Solution analysis complete", "solution_analysis_complete", {})
                 else:
                      logger.warning("Solution analyzer not available, skipping")
+                     if 'solution_analysis' in progress['pending_components']:
+                         progress['pending_components'].remove('solution_analysis')
+
             except Exception as e:
                 error_msg = f"Error in solution analysis: {e}"
                 logger.error(error_msg)
                 progress['errors'].append({'component': 'solution_analysis', 'error': str(e)})
                 self._log_to_opik("Async Solution analysis error", "solution_analysis_error", {"error": str(e)})
+                if 'solution_analysis' in progress['pending_components']:
+                    progress['pending_components'].remove('solution_analysis')
+            finally: # Ensure solution data is always set
+                 research_data['solution'] = solution_analysis # Store result (or None)
+                 research_data['proposed_solution'] = { # For compatibility
+                      'name': solution_analysis.get('solution', 'Proposed Solution') if solution_analysis else 'Proposed Solution',
+                      'advantages': solution_analysis.get('pro_arguments', []) if solution_analysis else [],
+                      'limitations': solution_analysis.get('counter_arguments', []) if solution_analysis else []
+                 }
+                 if solution_analysis and 'solution_analysis' in progress['pending_components']:
+                    progress['completed_components'].append('solution_analysis')
+                    progress['pending_components'].remove('solution_analysis')
+                 elif not solution_analysis and 'solution_analysis' not in progress['errors'] and 'solution_analysis' in progress['pending_components']:
+                     progress['pending_components'].remove('solution_analysis')
+
         if hasattr(self, 'solution_analyzer') and self.solution_analyzer:
             tasks.append(solution_task())
         else:
-             progress['pending_components'].remove('solution_analysis')
+             if 'solution_analysis' in progress['pending_components']:
+                 progress['pending_components'].remove('solution_analysis')
 
-        # ... Add similar async tasks for Paradigm, Audience, Analogy, Visual Assets ...
-        # (Placeholder for brevity - a full implementation would make these async tasks)
-        # Example for Paradigm:
+        # Task 4: Paradigm Analysis (already async)
         async def paradigm_task():
+             paradigm_analysis = None # Initialize to None
              try:
                  if hasattr(self, 'paradigm_analyzer') and self.paradigm_analyzer:
                      paradigm_analysis = await self.paradigm_analyzer.analyze_paradigms(metadata.get('main_topic', ''))
-                     research_data['paradigms'] = paradigm_analysis
-                     research_data['current_paradigm'] = { # For compatibility
-                          'name': paradigm_analysis.get('historical_paradigms', [{}])[-1].get('name', 'Current Paradigm'),
-                          'limitations': [] # Placeholder
-                     }
-                     progress['completed_components'].append('paradigm_analysis')
-                     progress['pending_components'].remove('paradigm_analysis')
-                     logger.info("Async Paradigm analysis completed")
-                     self._log_to_opik("Async Paradigm analysis complete", "paradigm_analysis_complete", {})
+                     if paradigm_analysis:
+                         logger.info("Async Paradigm analysis completed successfully")
+                         self._log_to_opik("Async Paradigm analysis complete", "paradigm_analysis_complete", {})
                  else:
                      logger.warning("Paradigm analyzer not available, skipping")
+                     if 'paradigm_analysis' in progress['pending_components']:
+                         progress['pending_components'].remove('paradigm_analysis')
              except Exception as e:
                   logger.error(f"Error in paradigm analysis: {e}")
                   progress['errors'].append({'component': 'paradigm_analysis', 'error': str(e)})
                   self._log_to_opik("Async Paradigm analysis error", "paradigm_analysis_error", {"error": str(e)})
+                  if 'paradigm_analysis' in progress['pending_components']:
+                      progress['pending_components'].remove('paradigm_analysis')
+             finally: # Ensure paradigm data is always set
+                 research_data['paradigms'] = paradigm_analysis # Store result (or None)
+                 research_data['current_paradigm'] = { # For compatibility
+                      'name': paradigm_analysis.get('historical_paradigms', [{}])[-1].get('name', 'Current Paradigm') if paradigm_analysis else 'Current Paradigm',
+                      'limitations': [] # Placeholder
+                 }
+                 if paradigm_analysis and 'paradigm_analysis' in progress['pending_components']:
+                     progress['completed_components'].append('paradigm_analysis')
+                     progress['pending_components'].remove('paradigm_analysis')
+                 elif not paradigm_analysis and 'paradigm_analysis' not in progress['errors'] and 'paradigm_analysis' in progress['pending_components']:
+                     progress['pending_components'].remove('paradigm_analysis')
+
         if hasattr(self, 'paradigm_analyzer') and self.paradigm_analyzer:
              tasks.append(paradigm_task())
         else:
-             progress['pending_components'].remove('paradigm_analysis')
+             if 'paradigm_analysis' in progress['pending_components']:
+                 progress['pending_components'].remove('paradigm_analysis')
 
-        # Placeholder for other components to avoid breaking execution flow
-        components_to_skip = ['audience_analysis', 'analogy_generation', 'visual_asset_collection']
-        for comp in components_to_skip:
-            if comp in progress['pending_components']:
-                 logger.warning(f"{comp.replace('_', ' ').title()} analyzer not available or task not implemented, skipping")
-                 progress['pending_components'].remove(comp)
+        # Task 5: Audience Analysis (already async)
+        async def audience_task():
+            audience_analysis = None
+            try:
+                if hasattr(self, 'audience_analyzer') and self.audience_analyzer:
+                    audience_analysis = await self.audience_analyzer.analyze_audience(metadata.get('main_topic', ''))
+                    if audience_analysis:
+                        logger.info("Async Audience analysis completed successfully")
+                        self._log_to_opik("Async Audience analysis complete", "audience_analysis_complete", {})
+                else:
+                    logger.warning("Audience analyzer not available, skipping")
+                    if 'audience_analysis' in progress['pending_components']:
+                        progress['pending_components'].remove('audience_analysis')
+            except Exception as e:
+                logger.error(f"Error in audience analysis: {e}")
+                progress['errors'].append({'component': 'audience_analysis', 'error': str(e)})
+                self._log_to_opik("Async Audience analysis error", "audience_analysis_error", {"error": str(e)})
+                if 'audience_analysis' in progress['pending_components']:
+                    progress['pending_components'].remove('audience_analysis')
+            finally:
+                research_data['audience'] = audience_analysis
+                if audience_analysis and 'audience_analysis' in progress['pending_components']:
+                    progress['completed_components'].append('audience_analysis')
+                    progress['pending_components'].remove('audience_analysis')
+                elif not audience_analysis and 'audience_analysis' not in progress['errors'] and 'audience_analysis' in progress['pending_components']:
+                    progress['pending_components'].remove('audience_analysis')
+
+        if hasattr(self, 'audience_analyzer') and self.audience_analyzer:
+            tasks.append(audience_task())
+        else:
+            if 'audience_analysis' in progress['pending_components']:
+                progress['pending_components'].remove('audience_analysis')
+
+        # Task 6: Analogy Generation (already async)
+        async def analogy_task():
+            analogy_result = None
+            try:
+                if hasattr(self, 'analogy_generator') and self.analogy_generator:
+                    # Wait for challenges and solution data to be potentially available
+                    await asyncio.sleep(0.2) # Allow some time for other tasks
+                    
+                    # --- MODIFIED CALL ---
+                    # Assuming generate_analogies expects topic and challenges (3 args total: self, topic, challenges)
+                    # If it expects topic and solution, change research_data.get('challenges', []) to research_data.get('solution', {})
+                    # If it expects topic and all research_data, change to research_data
+                    analogy_result = await self.analogy_generator.generate_analogies(
+                        metadata.get('main_topic', ''),
+                        research_data.get('challenges', []) 
+                        # Removed: research_data.get('solution', {}) 
+                    )
+                    # --- END MODIFIED CALL ---
+
+                    if analogy_result:
+                        logger.info("Async Analogy generation completed successfully")
+                        self._log_to_opik("Async Analogy generation complete", "analogy_generation_complete", {})
+                else:
+                    logger.warning("Analogy generator not available, skipping")
+                    if 'analogy_generation' in progress['pending_components']:
+                        progress['pending_components'].remove('analogy_generation')
+            except Exception as e:
+                # Use f-string for clearer error logging
+                logger.error(f"Error in analogy generation: {e}") 
+                progress['errors'].append({'component': 'analogy_generation', 'error': str(e)})
+                self._log_to_opik("Async Analogy generation error", "analogy_generation_error", {"error": str(e)})
+                if 'analogy_generation' in progress['pending_components']:
+                    progress['pending_components'].remove('analogy_generation')
+            finally:
+                research_data['analogies'] = analogy_result
+                if analogy_result and 'analogy_generation' in progress['pending_components']:
+                    progress['completed_components'].append('analogy_generation')
+                    progress['pending_components'].remove('analogy_generation')
+                elif not analogy_result and 'analogy_generation' not in progress['errors'] and 'analogy_generation' in progress['pending_components']:
+                    progress['pending_components'].remove('analogy_generation')
+
+        if hasattr(self, 'analogy_generator') and self.analogy_generator:
+            tasks.append(analogy_task())
+        else:
+            if 'analogy_generation' in progress['pending_components']:
+                progress['pending_components'].remove('analogy_generation')
+
+        # Task 7: Visual Asset Collection (already async)
+        async def visual_asset_task():
+            visual_assets_result = None
+            try:
+                if hasattr(self, 'visual_asset_collector') and self.visual_asset_collector:
+                    # Wait for solution and paradigm data
+                    await asyncio.sleep(0.3) # Allow more time
+                    visual_assets_result = await self.visual_asset_collector.analyze_visual_assets(
+                        metadata.get('main_topic', ''),
+                        research_data.get('solution', {}),
+                        research_data.get('paradigms', {})
+                    )
+                    if visual_assets_result:
+                        logger.info("Async Visual asset collection completed successfully")
+                        self._log_to_opik("Async Visual asset collection complete", "visual_asset_collection_complete", {})
+                else:
+                    # Log skip only if it exists in pending list
+                    if 'visual_asset_collection' in progress['pending_components']:
+                        logger.warning("Visual asset collector not available, skipping")
+                        progress['pending_components'].remove('visual_asset_collection')
+
+            except Exception as e:
+                logger.error(f"Error in visual asset collection: {e}")
+                progress['errors'].append({'component': 'visual_asset_collection', 'error': str(e)})
+                self._log_to_opik("Async Visual asset collection error", "visual_asset_collection_error", {"error": str(e)})
+                if 'visual_asset_collection' in progress['pending_components']:
+                    progress['pending_components'].remove('visual_asset_collection')
+            finally:
+                research_data['visual_assets'] = visual_assets_result
+                if visual_assets_result and 'visual_asset_collection' in progress['pending_components']:
+                    progress['completed_components'].append('visual_asset_collection')
+                    progress['pending_components'].remove('visual_asset_collection')
+                elif not visual_assets_result and 'visual_asset_collection' not in progress['errors'] and 'visual_asset_collection' in progress['pending_components']:
+                    progress['pending_components'].remove('visual_asset_collection')
+
+        if hasattr(self, 'visual_asset_collector') and self.visual_asset_collector:
+            tasks.append(visual_asset_task())
+        else:
+            if 'visual_asset_collection' in progress['pending_components']:
+                 progress['pending_components'].remove('visual_asset_collection')
+
 
         # Run all research tasks concurrently
         await asyncio.gather(*tasks)
-        
+
         # Calculate completion percentage
-        total_components = len(progress['completed_components']) + len(progress['pending_components']) + len(progress['errors'])
-        if total_components > 0:
-             progress['completion_percentage'] = int(
-                 (len(progress['completed_components']) / total_components) * 100
-             )
+        # total_components = len(progress['completed_components']) + len(progress['pending_components']) + len(progress['errors'])
+        initial_component_count = 7 # Hardcoded initial count
+        completed_count = len(progress['completed_components'])
+        error_count = len(progress['errors'])
+        # Skipped count = initial - completed - errors - pending
+        skipped_count = initial_component_count - completed_count - error_count - len(progress['pending_components'])
+
+        if initial_component_count > 0:
+             # Consider completed / (initial - skipped) as percentage of attempted components
+             attempted_components = initial_component_count - skipped_count
+             if attempted_components > 0:
+                 progress['completion_percentage'] = int(
+                     (completed_count / attempted_components) * 100
+                 )
+             else: # If all were skipped
+                 progress['completion_percentage'] = 100
         else:
             progress['completion_percentage'] = 100 # No components to run
         
@@ -961,8 +1131,10 @@ class ResearcherAgent:
         total_score += visual_assets_score
         
         # 7. Analogies Score
-        challenge_analogies_count = len(research_data.get('analogies', {}).get('challenge_analogies', []))
-        solution_analogies_count = len(research_data.get('analogies', {}).get('solution_analogies', []))
+        analogies_data = research_data.get('analogies', {}) # Use .get() for safety
+        # Default to empty lists if analogies_data is None or keys are missing
+        challenge_analogies_count = len(analogies_data.get('challenge_analogies', [])) if analogies_data else 0
+        solution_analogies_count = len(analogies_data.get('solution_analogies', [])) if analogies_data else 0
         
         # Challenge analogies score
         challenge_analogies_target = self.readiness_thresholds.get('challenge_analogies_target', 3)
@@ -1463,7 +1635,7 @@ class ResearcherAgent:
         report.append("\n## Blog Information")
         report.append(f"- **Title:** {metadata.get('blog_title', 'Untitled')}")
         report.append(f"- **Version:** {metadata.get('version', 1)}")
-        report.append(f"- **Readiness Score:** {readiness_score}/100")
+        report.append(f"- **Readiness Score:** {readiness_score:.1f}/100")
         
         # Add topic analysis
         report.append("\n## Topic Analysis")
@@ -1485,153 +1657,189 @@ class ResearcherAgent:
         
         # System affected / Industry challenges
         report.append("\n### Industry/System Challenges")
-        if 'system_affected' in research_data and research_data['system_affected']:
-            system = research_data['system_affected']
+        system = research_data.get('system_affected', {})
+        if system:
             report.append(f"**Name:** {system.get('name', 'Unknown System')}")
             report.append(f"**Description:** {system.get('description', 'No description available')}")
             report.append(f"**Scale:** {system.get('scale', 'Unknown')}")
             
-            if 'challenges' in research_data and research_data['challenges']:
+            challenges = research_data.get('challenges', [])
+            if challenges:
                 report.append("\n#### Key Challenges")
-                for i, challenge in enumerate(research_data['challenges'][:5], 1):
-                    challenge_title = challenge.get('challenge', challenge.get('title', f'Challenge {i}'))
-                    challenge_desc = challenge.get('description', 'No description available')
-                    report.append(f"**{i}. {challenge_title}**")
-                    report.append(f"  - {challenge_desc}")
+                for i, challenge in enumerate(challenges[:5], 1):
+                    if isinstance(challenge, dict):
+                        challenge_title = challenge.get('challenge', challenge.get('name', f'Challenge {i}'))
+                        challenge_desc = challenge.get('description', 'No description available')
+                        report.append(f"**{i}. {challenge_title}**")
+                        report.append(f"  - {challenge_desc}")
+                    else:
+                         report.append(f"**{i}. Invalid challenge format: {challenge}**")
+            else:
+                 report.append("\nNo challenges identified.")
+        else:
+             report.append("\nNo system/industry analysis data available.")
         
         # Solution analysis
         report.append("\n### Solution Analysis")
+        solution_data = research_data.get('solution', {})
+        proposed_solution = research_data.get('proposed_solution', {})
         
-        # Proposed solution
-        if 'proposed_solution' in research_data and research_data['proposed_solution']:
-            solution = research_data['proposed_solution']
-            report.append(f"**Name:** {solution.get('name', 'Proposed Solution')}")
-            report.append(f"**Description:** {solution.get('description', 'No description available')}")
+        solution_name = solution_data.get('solution', proposed_solution.get('name', 'Proposed Solution'))
+        solution_description = solution_data.get('description', proposed_solution.get('description', 'No description available'))
+        
+        report.append(f"**Name:** {solution_name}")
+        report.append(f"**Description:** {solution_description}")
         
         # Pro arguments
         report.append("\n#### Supporting Arguments")
-        if 'solution' in research_data and 'pro_arguments' in research_data['solution']:
-            pro_args = research_data['solution']['pro_arguments']
-            if pro_args:
-                for i, arg in enumerate(pro_args[:5], 1):
-                    if isinstance(arg, dict):
-                        arg_text = arg.get('argument', f'Argument {i}')
-                        report.append(f"**{i}. {arg_text}**")
-                        if 'explanation' in arg:
-                            report.append(f"  - {arg['explanation']}")
-                    else:
-                        report.append(f"**{i}. {arg}**")
-            else:
-                report.append("No supporting arguments identified.")
-        # Check advantages in proposed_solution as a fallback (for test compatibility)
-        elif 'proposed_solution' in research_data and 'advantages' in research_data['proposed_solution']:
-            advantages = research_data['proposed_solution']['advantages']
-            if advantages:
-                for i, adv in enumerate(advantages[:5], 1):
-                    report.append(f"**{i}. {adv}**")
-                    # For test_generate_research_report compatibility
-                    report.append(f"  - {adv}")
-            else:
-                report.append("No supporting arguments identified.")
+        pro_args = solution_data.get('pro_arguments', proposed_solution.get('advantages', []))
+        if pro_args:
+            for i, arg in enumerate(pro_args[:5], 1):
+                if isinstance(arg, dict):
+                    arg_text = arg.get('argument', arg.get('name', f'Argument {i}'))
+                    report.append(f"**{i}. {arg_text}**")
+                    explanation = arg.get('explanation', arg.get('description', ''))
+                    if explanation:
+                        report.append(f"  - {explanation}")
+                else:
+                    report.append(f"**{i}. {arg}**")
+                    report.append(f"  - {arg}")
         else:
             report.append("No supporting arguments identified.")
         
         # Counter arguments
         report.append("\n#### Counter Arguments")
-        if 'solution' in research_data and 'counter_arguments' in research_data['solution']:
-            counter_args = research_data['solution']['counter_arguments']
-            if counter_args:
-                for i, arg in enumerate(counter_args[:3], 1):
-                    if isinstance(arg, dict):
-                        arg_text = arg.get('argument', f'Counter-argument {i}')
-                        report.append(f"**{i}. {arg_text}**")
-                        if 'explanation' in arg:
-                            report.append(f"  - {arg['explanation']}")
-                        if 'rebuttal' in arg:
-                            report.append(f"  - Rebuttal: {arg['rebuttal']}")
-                    else:
-                        report.append(f"**{i}. {arg}**")
-            else:
-                report.append("No counter arguments identified.")
+        counter_args = solution_data.get('counter_arguments', proposed_solution.get('limitations', []))
+        if counter_args:
+            for i, arg in enumerate(counter_args[:3], 1):
+                if isinstance(arg, dict):
+                    arg_text = arg.get('argument', arg.get('name', f'Counter-argument {i}'))
+                    report.append(f"**{i}. {arg_text}**")
+                    explanation = arg.get('explanation', arg.get('description', ''))
+                    if explanation:
+                        report.append(f"  - {explanation}")
+                    rebuttal = arg.get('rebuttal', arg.get('defense_rebuttal', ''))
+                    if rebuttal:
+                        report.append(f"  - Rebuttal: {rebuttal}")
+                else:
+                    report.append(f"**{i}. {arg}**")
+        else:
+            report.append("No counter arguments identified.")
         
         # Paradigm analysis
         report.append("\n### Historical Paradigm Analysis")
-        if 'current_paradigm' in research_data and research_data['current_paradigm']:
-            paradigm = research_data['current_paradigm']
-            report.append(f"**Name:** {paradigm.get('name', 'Current Approach')}")
-            report.append(f"**Description:** {paradigm.get('description', 'No description available')}")
-            
-            if 'limitations' in paradigm and paradigm['limitations']:
-                report.append("\n#### Limitations")
-                for limitation in paradigm['limitations']:
-                    report.append(f"  - {limitation}")
+        paradigm_data = research_data.get('paradigms', {})
+        current_paradigm = research_data.get('current_paradigm', {})
+        
+        paradigm_name = current_paradigm.get('name', 'Current Approach')
+        if paradigm_data.get('historical_paradigms'):
+            last_paradigm = paradigm_data['historical_paradigms'][-1]
+            paradigm_name = last_paradigm.get('name', paradigm_name)
+            paradigm_desc = last_paradigm.get('description', 'No description available')
+        else:
+            paradigm_desc = current_paradigm.get('description', 'No description available')
+        
+        report.append(f"**Name:** {paradigm_name}")
+        report.append(f"**Description:** {paradigm_desc}")
+        
+        limitations = current_paradigm.get('limitations', [])
+        if limitations:
+            report.append("\n#### Limitations")
+            for limitation in limitations:
+                report.append(f"  - {limitation}")
+        elif paradigm_data.get('lessons'):
+            report.append("\n#### Key Lessons")
+            for i, lesson in enumerate(paradigm_data.get('lessons', [])[:3], 1):
+                 if isinstance(lesson, dict):
+                     report.append(f"**{i}. {lesson.get('lesson', 'Lesson')}**: {lesson.get('explanation', '')}")
         
         # Audience analysis
         report.append("\n### Audience Analysis")
-        if 'audience_analysis' in research_data and research_data['audience_analysis']:
-            audience = research_data['audience_analysis']
-            report.append(f"**Knowledge Level:** {audience.get('knowledge_level', 'moderate')}")
-            report.append(f"**Background:** {audience.get('background', 'General audience')}")
-            
-            if 'interests' in audience and audience['interests']:
-                report.append("\n#### Key Interests")
-                for interest in audience['interests']:
-                    report.append(f"  - {interest}")
+        audience_data = research_data.get('audience', {})
+        audience_analysis_legacy = research_data.get('audience_analysis', {})
+        
+        knowledge_level = audience_data.get('knowledge_level', audience_analysis_legacy.get('knowledge_level', 'moderate'))
+        background = audience_data.get('background', audience_analysis_legacy.get('background', 'General audience'))
+        
+        report.append(f"**Knowledge Level:** {knowledge_level}")
+        report.append(f"**Background:** {background}")
+        
+        interests = audience_data.get('interests', audience_analysis_legacy.get('interests', []))
+        if interests:
+            report.append("\n#### Key Interests")
+            for interest in interests:
+                report.append(f"  - {interest}")
+        elif audience_data.get('audience_segments'):
+             report.append("\n#### Identified Segments")
+             for i, segment in enumerate(audience_data.get('audience_segments', [])[:3], 1):
+                 if isinstance(segment, dict):
+                     report.append(f"**{i}. {segment.get('name', 'Segment')}**: {segment.get('description', '')}")
         
         # Analogies
         report.append("\n### Powerful Analogies")
-        if 'analogies' in research_data:
-            analogies = research_data['analogies']
+        analogies_data = research_data.get('analogies', {})
+        if analogies_data:
+            challenge_analogies = analogies_data.get('challenge_analogies', [])
+            solution_analogies = analogies_data.get('solution_analogies', [])
+            generated_analogies = analogies_data.get('generated_analogies', [])
             
-            challenge_analogies = analogies.get('challenge_analogies', [])
-            solution_analogies = analogies.get('solution_analogies', [])
+            all_analogies = challenge_analogies + solution_analogies + generated_analogies
             
-            if challenge_analogies or solution_analogies:
-                for i, analogy in enumerate(challenge_analogies[:2], 1):
-                    title = analogy.get('title', analogy.get('analogy', f'Challenge Analogy {i}'))
-                    desc = analogy.get('description', analogy.get('explanation', 'No description available'))
-                    report.append(f"**{i}. {title}**")
-                    report.append(f"  - {desc}")
-                
-                for i, analogy in enumerate(solution_analogies[:2], len(challenge_analogies) + 1):
-                    title = analogy.get('title', analogy.get('analogy', f'Solution Analogy {i}'))
-                    desc = analogy.get('description', analogy.get('explanation', 'No description available'))
-                    report.append(f"**{i}. {title}**")
-                    report.append(f"  - {desc}")
+            if all_analogies:
+                displayed_count = 0
+                for i, analogy in enumerate(all_analogies):
+                     if displayed_count >= 4: break
+                     if isinstance(analogy, dict):
+                         title = analogy.get('title', analogy.get('analogy', f'Analogy {i+1}'))
+                         desc = analogy.get('description', analogy.get('explanation', 'No description available'))
+                         report.append(f"**{displayed_count+1}. {title}**")
+                         report.append(f"  - {desc}")
+                         displayed_count += 1
             else:
                 report.append("No analogies identified.")
+        else:
+            report.append("No analogies identified.")
         
         # Visual assets
-        if 'visual_assets' in research_data and research_data['visual_assets']:
-            visual_assets = research_data['visual_assets']
-            solution_visuals = visual_assets.get('solution_visuals', [])
-            paradigm_visuals = visual_assets.get('paradigm_visuals', [])
+        visual_assets_data = research_data.get('visual_assets', {})
+        if visual_assets_data:
+            solution_visuals = visual_assets_data.get('solution_visuals', [])
+            paradigm_visuals = visual_assets_data.get('paradigm_visuals', [])
+            if not solution_visuals and not paradigm_visuals and isinstance(visual_assets_data, list):
+                 solution_visuals = visual_assets_data
             
             if solution_visuals or paradigm_visuals:
                 report.append("\n### Visual Assets")
+                displayed_count = 0
                 
-                for i, visual in enumerate(solution_visuals[:3], 1):
-                    title = visual.get('title', f'Solution Visual {i}')
-                    url = visual.get('url', 'No URL available')
-                    caption = visual.get('caption', visual.get('description', 'No caption available'))
-                    
-                    report.append(f"**{i}. {title}**")
-                    report.append(f"  - URL: {url}")
-                    report.append(f"  - Caption: {caption}")
+                for i, visual in enumerate(solution_visuals):
+                    if displayed_count >= 3: break
+                    if isinstance(visual, dict):
+                        title = visual.get('title', f'Solution Visual {i+1}')
+                        url = visual.get('url', 'No URL available')
+                        caption = visual.get('caption', visual.get('description', 'No caption available'))
+                        
+                        report.append(f"**{displayed_count+1}. {title}**")
+                        report.append(f"  - URL: {url}")
+                        report.append(f"  - Caption: {caption}")
+                        displayed_count += 1
                 
-                for i, visual in enumerate(paradigm_visuals[:2], len(solution_visuals) + 1):
-                    title = visual.get('title', f'Paradigm Visual {i}')
-                    url = visual.get('url', 'No URL available')
-                    caption = visual.get('caption', visual.get('description', 'No caption available'))
-                    
-                    report.append(f"**{i}. {title}**")
-                    report.append(f"  - URL: {url}")
-                    report.append(f"  - Caption: {caption}")
+                for i, visual in enumerate(paradigm_visuals):
+                    if displayed_count >= 5: break
+                    if isinstance(visual, dict):
+                        title = visual.get('title', f'Paradigm Visual {i+1}')
+                        url = visual.get('url', 'No URL available')
+                        caption = visual.get('caption', visual.get('description', 'No caption available'))
+                        
+                        report.append(f"**{displayed_count+1}. {title}**")
+                        report.append(f"  - URL: {url}")
+                        report.append(f"  - Caption: {caption}")
+                        displayed_count += 1
         
         # Citations
         report.append("\n## Citations")
-        if 'citations' in research_data and research_data['citations']:
-            citations = research_data['citations']
+        citations = research_data.get('citations', [])
+        if citations:
             report.append("\nThe following sources were found during research:\n")
             
             for i, citation in enumerate(citations, 1):
@@ -1646,11 +1854,16 @@ class ResearcherAgent:
         report.append("\n## Readiness Assessment")
         readiness_text = "This blog post shows "
         
-        if readiness_score >= 80:
+        try:
+            numeric_score = float(readiness_score)
+        except (ValueError, TypeError):
+            numeric_score = 0.0
+            
+        if numeric_score >= 80:
             readiness_text += "**excellent readiness** for review. It provides comprehensive information and is well-structured."
-        elif readiness_score >= 70:
+        elif numeric_score >= 70:
             readiness_text += "**good readiness** for review. Some improvements might enhance the overall quality, but it can proceed to the review stage."
-        elif readiness_score >= 60:
+        elif numeric_score >= 60:
             readiness_text += "**adequate readiness** for review. Consider addressing the improvement areas noted before proceeding to the review stage."
         else:
             readiness_text += "**needs improvement** before review. Please address the deficiencies noted in this report."
@@ -1660,11 +1873,10 @@ class ResearcherAgent:
         # Score breakdown
         if 'score_components' in research_data:
             report.append("\n### Score Breakdown")
-            components = research_data['score_components']
-            for name, score in components.items():
-                if name != 'base_score':  # Skip base score in the breakdown
-                    report.append(f"- **{name.replace('_', ' ').title()}:** {score:.1f} points")
-            
+            for name, score in research_data['score_components'].items():
+                if name != 'base_score':
+                    report.append(f"- **{name.replace('_', ' ').title()}:** {float(score):.1f} points")
+        
         # Combine the report
         final_report = "\n".join(report)
         
