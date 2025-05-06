@@ -476,19 +476,26 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
                     try:
                         # Use search_web directly and await the result
                         search_results = await self.source_validator.search_web(f"{query} image", count=5)
-                        # Format results as visual assets
-                        visual_assets = [
-                            {
-                                "url": result.get("url", ""),
-                                "title": result.get("title", ""),
-                                "description": result.get("description", ""),
-                                "source": result.get("source", "Brave Search")
-                            }
-                            for result in search_results
-                        ]
+                        
+                        # Ensure search_results is iterable (e.g., a list) before processing
+                        if isinstance(search_results, list):
+                            # Format results as visual assets
+                            visual_assets = [
+                                {
+                                    "url": result.get("url", ""),
+                                    "title": result.get("title", ""),
+                                    "description": result.get("description", ""),
+                                    "source": result.get("source", "Brave Search") # Default source if missing
+                                }
+                                for result in search_results
+                            ]
+                        else:
+                            logger.warning(f"Brave search fallback for {analogy.get('title', 'Untitled')} did not return a list. Received: {type(search_results)}")
+                            visual_assets = [] # Keep visual_assets empty if search failed
                     except Exception as e:
-                        logger.error(f"Error searching for images with Brave API: {e}")
-                        visual_assets = []
+                        # Log the specific error during Brave fallback
+                        logger.error(f"Error searching for images with Brave API fallback: {e}", exc_info=True)
+                        visual_assets = [] # Ensure visual_assets remains empty on error
             except Exception as e:
                 logger.error(f"Error searching for images: {e}")
                 visual_assets = []

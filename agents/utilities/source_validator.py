@@ -18,6 +18,7 @@ import requests
 from urllib.parse import urlparse
 from collections import deque
 import asyncio
+import httpx
 
 # Configure logging
 logging.basicConfig(
@@ -284,43 +285,75 @@ class SourceValidator:
     
     def get_domain_tier(self, url: str) -> str:
         """
-        Get the credibility tier for a domain.
-        
+        Determine the credibility tier of a domain based on TLD and specific domains.
+
         Args:
-            url: URL to check
-            
+            url: The URL to check
+
         Returns:
-            Credibility tier ('academic', 'high', 'news', 'medium', 'low', 'untrusted')
+            Credibility tier (e.g., 'high', 'medium', 'low', 'news', 'academic')
         """
-        parsed = urlparse(url)
-        domain = parsed.netloc or parsed.path
-        domain = re.sub(r'^www\.', '', domain)
-        
-        # Check if blacklisted
-        if self.is_blacklisted(url):
-            return "untrusted"
-        
-        # Check for academic/government domains
-        domain_parts = domain.split('.')
-        tld = domain_parts[-1] if len(domain_parts) > 1 else ""
-        
-        if any(domain.endswith(f".{suffix}") for suffix in self.credibility_tiers["academic"]):
-            return "academic"
-        
-        # Check other tiers
-        for tier, domains in self.credibility_tiers.items():
-            if tier == "untrusted" or tier == "academic":
-                continue
+        try:
+            domain = urlparse(url).netloc.lower()
             
-            if any(domain.endswith(trusted_domain) for trusted_domain in domains):
-                return tier
-        
-        # Default to low if not found in other tiers
-        return "low"
+            # Check if domain is empty after parsing (e.g., for invalid URLs)
+            if not domain:
+                return "unknown"
+
+            # Remove www. prefix if present
+            if domain.startswith("www."):
+                domain = domain[4:]
+
+            # Define domain lists (can be expanded)
+            high_credibility_domains = [
+                "nature.com", "science.org", "thelancet.com", "nejm.org", 
+                "cell.com", "ieee.org", "acm.org", "arxiv.org",
+                "pubmed.ncbi.nlm.nih.gov", "fda.gov", "cdc.gov", "who.int",
+                "nih.gov"
+            ]
+            
+            news_domains = [
+                "bbc.co.uk", "bbc.com", "reuters.com", "apnews.com", 
+                "nytimes.com", "wsj.com", "washingtonpost.com", "theguardian.com",
+                "npr.org", "pbs.org"
+            ]
+            
+            medium_credibility_domains = [
+                "wikipedia.org", "webmd.com", "mayoclinic.org", "techcrunch.com",
+                "wired.com", "arstechnica.com", "stackoverflow.com", "github.com",
+                "medium.com", "substack.com" # Added substack
+            ]
+            
+            low_credibility_domains = [
+                "reddit.com", "4chan.org", "quora.com", "facebook.com",
+                "twitter.com", "instagram.com", "tiktok.com", "tumblr.com",
+                "livejournal.com", "blogspot.com" # Added blogspot.com
+            ]
+            
+            academic_tlds = [".edu", ".ac.uk", ".ac.jp", ".ac.cn", ".edu.au"]
+
+            # Check specific domain lists first
+            if domain in high_credibility_domains:
+                return "high"
+            elif domain in news_domains:
+                return "news"
+            elif any(domain.endswith(tld) for tld in academic_tlds):
+                return "academic"
+            elif domain in medium_credibility_domains:
+                return "medium"
+            elif domain in low_credibility_domains:
+                return "low"
+                
+            # Default tier
+            return "default"
+            
+        except Exception as e:
+            logger.error(f"Error parsing URL {url} for domain tier: {e}")
+            return "unknown"
     
     def get_credibility_score(self, url: str) -> int:
         """
-        Get a numeric credibility score for a URL.
+        Get a numeric credibility score for a URL based on the domain tier.
         
         Args:
             url: URL to score
@@ -328,33 +361,25 @@ class SourceValidator:
         Returns:
             Score from 0-10 where 10 is highest credibility
         """
-        # Check if blacklisted
+        # Check blacklist first
         if self.is_blacklisted(url):
             return 0
             
-        # Parse domain
-        parsed = urlparse(url)
-        domain = parsed.netloc or parsed.path
-        domain = re.sub(r'^www\.', '', domain)
+        tier = self.get_domain_tier(url)
         
-        # Check domain tiers
-        if any(domain.endswith(f".{suffix}") for suffix in self.credibility_tiers["academic"]):
-            return 10
-            
-        # Check high credibility sources
-        if any(domain.endswith(trusted_domain) for trusted_domain in self.credibility_tiers["high"]):
-            return 9
-            
-        # Check news sources
-        if any(domain.endswith(trusted_domain) for trusted_domain in self.credibility_tiers["news"]):
-            return 8
-            
-        # Check medium credibility sources
-        if any(domain.endswith(trusted_domain) for trusted_domain in self.credibility_tiers["medium"]):
-            return 6
-            
-        # Default to medium-low credibility
-        return 5
+        # Map tier to score
+        tier_scores = {
+            "academic": 10,
+            "high": 9,
+            "news": 8,
+            "medium": 6,
+            "low": 4,
+            "default": 5,
+            "untrusted": 0, # Should already be caught by is_blacklisted check
+            "unknown": 3
+        }
+        
+        return tier_scores.get(tier, 5) # Default to 5 (default score) if tier is not in map
     
     def validate_source(self, source: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -365,23 +390,38 @@ class SourceValidator:
             
         Returns:
             Enriched source with validation data
+        
+        Raises:
+            SourceValidationError: If the source is blacklisted.
         """
         url = source.get('url')
         if not url:
             return source
-        
-        # Get credibility score
+
+        # Raise error if blacklisted
+        if self.is_blacklisted(url):
+            raise SourceValidationError(f"Source URL is blacklisted: {url}")
+
+        # Get credibility score and tier
         score = self.get_credibility_score(url)
+        tier = self.get_domain_tier(url)
         
         # Parse domain
         parsed = urlparse(url)
         domain = parsed.netloc or parsed.path
+        if domain.startswith("www."):
+            domain = domain[4:]
+            
+        # Get publication date if available
+        publication_date = source.get('date')
         
         # Add validation data
         source['validation'] = {
             'domain': domain,
             'credibility_score': score,
-            'blacklisted': self.is_blacklisted(url),
+            'credibility_tier': tier,
+            'blacklisted': False, # Already checked above
+            'publication_date': publication_date, # Add publication date
             'validated_at': datetime.now().isoformat()
         }
         
@@ -389,72 +429,56 @@ class SourceValidator:
     
     async def search_web(self, query: str, count: int = 5) -> List[Dict[str, Any]]:
         """
-        Search the web for a query using Brave Search API.
-        Optimized for Premium Plan (20 requests per second).
-        
+        Search the web using the Brave Search API.
+
         Args:
             query: Search query
-            count: Number of results to return
+            count: Number of results to fetch
             
         Returns:
-            List of search result dictionaries
-        """
-        # Check cache before making API calls
-        cache_key = f"web:{query}:count:{count}"
-        if cache_key in self.search_cache:
-            logger.info(f"Using cached results for web search: {query}")
-            return self.search_cache[cache_key]
+            List of validated search results
             
+        Raises:
+            SourceValidationError: If API key is missing or API call fails.
+        """
         if not self.brave_api_key:
-            logger.warning("Brave API key not available. Using mock data.")
-            # Return mock data
-            mock_results = [
-                {
-                    'title': f'Result for "{query}" #{i}',
-                    'url': f'https://example.com/result{i}',
-                    'description': f'This is a mock search result #{i} for query: {query}',
-                    'source': 'Mock Source',
-                    'date': datetime.now().isoformat()
-                } for i in range(1, count + 1)
-            ]
-            # Cache the mock results
-            self.search_cache[cache_key] = mock_results
-            return mock_results
+            raise SourceValidationError("Brave Search API key is not configured.")
+
+        cache_key = f"{query}_{count}"
+        if cache_key in self.search_cache:
+            logger.info(f"Using cached search results for query: {query}")
+            return self.search_cache[cache_key]
+
+        headers = {
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "X-Subscription-Token": self.brave_api_key
+        }
+        params = {
+            "q": query,
+            "count": count,
+            "safesearch": "moderate" # Options: off, moderate, strict
+        }
         
-        max_retries = 5  # Keep 5 retries for robustness
+        max_retries = 5
         retry_count = 0
         
         while retry_count < max_retries:
             try:
-                # Prepare request
-                headers = {
-                    'Accept': 'application/json',
-                    'X-Subscription-Token': self.brave_api_key
-                }
-                
-                params = {
-                    'q': query,
-                    'count': count * 2,  # Request more to filter blacklisted
-                    'search_lang': 'en'
-                }
-                
-                # Apply rate limiting - use the async version
+                # Ensure rate limit is respected
                 await self.rate_limiter.wait_if_needed()
                 
-                # Add a small delay based on retry count (much shorter for Premium plan)
-                if retry_count > 0:
-                    await asyncio.sleep(retry_count * 0.2)  # Shorter delays - 0.2s, 0.4s, 0.6s, 0.8s
-                
-                # Make request
-                response = requests.get(
-                    'https://api.search.brave.com/res/v1/web/search',
-                    headers=headers,
-                    params=params,
-                    timeout=10  # Add timeout to prevent hanging requests
-                )
-                
+                # Use async client correctly
+                async with httpx.AsyncClient(timeout=10) as client: # Use context manager
+                    response = await client.get( # Await the get call on the client instance
+                        "https://api.search.brave.com/res/v1/web/search",
+                        headers=headers,
+                        params=params
+                    )
+
+                # Handle rate limiting (429)
                 if response.status_code == 429:
-                    # Rate limit hit - unusual for Premium plan but still possible
+                    logger.error(f"Brave API rate limit hit (429) for query: {query}")
                     retry_count += 1
                     # Record for adaptive rate limiting
                     self.rate_limiter.record_rate_limit_error()
@@ -488,34 +512,41 @@ class SourceValidator:
                         logger.warning(f"Server error, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries})")
                         await asyncio.sleep(wait_time)
                         continue
-                    raise SourceValidationError(f"Brave Search API error: {response.status_code}")
+                    raise SourceValidationError(f"Brave Search API error: {response.status_code} - {response.text}") # Include response text
                 
                 # Process results
                 results = []
                 try:
-                    web_results = response.json().get('web', {}).get('results', [])
+                    data = await response.json() # Await the JSON parsing
+                    web_results = data.get('web', {}).get('results', [])
                 except ValueError as e:
-                    logger.error(f"Error parsing JSON response: {e}")
+                    logger.error(f"Error parsing JSON response: {e} - Response text: {response.text}") # Log response text
                     raise SourceValidationError(f"Failed to parse API response: {e}")
                 
                 for result in web_results:
                     url = result.get('url')
                     
                     # Skip blacklisted sources
-                    if self.is_blacklisted(url):
+                    if url and self.is_blacklisted(url):
+                        logger.info(f"Skipping blacklisted source: {url}")
                         continue
                     
                     source = {
                         'title': result.get('title'),
                         'url': url,
                         'description': result.get('description'),
-                        'source': result.get('extra_snippets', {}).get('source', 'Unknown Source'),
-                        'date': datetime.now().isoformat()
+                        'source': result.get('profile', {}).get('name', 'Unknown Source'), # Use profile name if available
+                        'date': result.get('page_age') # Try to get page_age as date
                     }
                     
-                    # Add validation data
-                    source = self.validate_source(source)
-                    results.append(source)
+                    # Add validation data only if URL exists
+                    if url:
+                        try:
+                            source = self.validate_source(source)
+                            results.append(source)
+                        except SourceValidationError as sve:
+                            logger.warning(f"Skipping source due to validation error: {sve}")
+                            continue # Skip this source
                     
                     # Stop when we have enough
                     if len(results) >= count:
@@ -526,27 +557,45 @@ class SourceValidator:
                 logger.info(f"Successfully found {len(results)} search results for query: {query}")
                 return results
                 
-            except Exception as e:
-                logger.error(f"Error searching web: {e}")
+            except httpx.RequestError as exc: # Catch httpx specific request errors
+                logger.error(f"HTTP Request Error searching web: {exc.__class__.__name__} - {exc}")
                 retry_count += 1
                 if retry_count < max_retries:
-                    wait_time = 0.5 + (retry_count * 0.5)  # Less steep backoff
-                    logger.warning(f"Error in web search, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries})")
+                    wait_time = 0.5 + (retry_count * 0.5)
+                    logger.warning(f"HTTP error, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries})")
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"Web search failed after {max_retries} retries: {e}")
-                    # Return fallback results instead of raising an exception
-                    mock_results = [
-                        {
-                            'title': f'Error fallback for "{query}" #{i}',
-                            'url': f'https://example.com/error{i}',
-                            'description': f'This is a fallback result #{i} due to errors for query: {query}. Error: {str(e)}',
-                            'source': 'Error Fallback',
-                            'date': datetime.now().isoformat()
-                        } for i in range(1, count + 1)
-                    ]
+                    logger.error(f"Web search failed after {max_retries} retries due to HTTP errors: {exc}")
+                    # Fallback results
+                    mock_results = self._create_fallback_results(query, count, str(exc))
                     self.search_cache[cache_key] = mock_results
                     return mock_results
+                    
+            except Exception as e:
+                logger.error(f"Unexpected error searching web: {e}", exc_info=True) # Log traceback
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = 0.5 + (retry_count * 0.5)
+                    logger.warning(f"Unexpected error, retrying in {wait_time} seconds (attempt {retry_count}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Web search failed after {max_retries} retries due to unexpected error: {e}")
+                    # Fallback results
+                    mock_results = self._create_fallback_results(query, count, str(e))
+                    self.search_cache[cache_key] = mock_results
+                    return mock_results
+                    
+    def _create_fallback_results(self, query: str, count: int, error_message: str) -> List[Dict[str, Any]]:
+        """Helper function to create fallback results."""
+        return [
+            {
+                'title': f'Error fallback for "{query}" #{i}',
+                'url': f'https://example.com/error{i}',
+                'description': f'This is a fallback result #{i} due to errors for query: {query}. Error: {error_message}',
+                'source': 'Error Fallback',
+                'date': datetime.now().isoformat()
+            } for i in range(1, count + 1)
+        ]
     
     async def find_supporting_contradicting_sources(
         self, 

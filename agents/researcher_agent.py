@@ -547,222 +547,228 @@ class ResearcherAgent:
         # Define async tasks for each component
         tasks = []
         
-        # Task 1: Gather citations (now async)
+        # --- Enhanced Logging for Tasks --- 
+
+        # Task 1: Citations (already async)
         async def citations_task():
+            citations_result = None
+            task_name = "Citations"
             try:
-                search_query = metadata.get('main_topic', '')
-                if len(metadata.get('headings', [])) > 1:
-                    search_query += ' ' + ' '.join(metadata.get('headings', [])[1:3])
-                citations = await self.search_citations(search_query, count=10)
-                research_data['citations'] = citations
-                progress['completed_components'].append('citations')
-                progress['pending_components'].remove('citations')
-                logger.info(f"Async citations gathered: {len(citations)}")
-                self._log_to_opik("Async Citations gathered", "citations_complete", {"count": len(citations)})
+                if self.brave_api_key:
+                    # Use the first section header as a query
+                    first_section = metadata.get('first_section_content', metadata.get('main_topic', ''))
+                    query = f"{metadata.get('main_topic', '')} {first_section[:100]}" # Limit query length
+                    citations_result = await self.search_citations(query, count=10)
+                    if citations_result:
+                        logger.info(f"Async {task_name} successful: Found {len(citations_result)} citations.") # Log Success
+                        self._log_to_opik(f"Async {task_name} complete", "citations_complete", {"count": len(citations_result)})
+                else:
+                    logger.warning("Brave API key not provided, skipping citation search.")
+                    if 'citations' in progress['pending_components']:
+                         progress['pending_components'].remove('citations')
             except Exception as e:
-                error_msg = f"Error gathering citations: {e}"
-                logger.error(error_msg)
+                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
                 progress['errors'].append({'component': 'citations', 'error': str(e)})
-                self._log_to_opik("Async Citation gathering error", "citations_error", {"error": str(e)})
-        tasks.append(citations_task())
-        
+                self._log_to_opik(f"Async {task_name} error", "citations_error", {"error": str(e)})
+                if 'citations' in progress['pending_components']:
+                    progress['pending_components'].remove('citations')
+            finally:
+                logger.info(f"Async {task_name} task finished.") # Log Completion
+                research_data['citations'] = citations_result if citations_result else []
+                if citations_result is not None and 'citations' in progress['pending_components']:
+                    progress['completed_components'].append('citations')
+                    progress['pending_components'].remove('citations')
+                elif citations_result is None and 'citations' not in progress['errors'] and 'citations' in progress['pending_components']:
+                     progress['pending_components'].remove('citations') # Remove if skipped
+
+        if self.brave_api_key:
+            tasks.append(citations_task())
+        else:
+             if 'citations' in progress['pending_components']:
+                 progress['pending_components'].remove('citations')
+
         # Task 2: Industry Analysis (already async)
         async def industry_task():
-            industry_analysis = None # Initialize to None
+            industry_result = None
+            task_name = "Industry Analysis"
             try:
                 if hasattr(self, 'industry_analyzer') and self.industry_analyzer:
-                    industry_analysis = await self.industry_analyzer.analyze_industry(metadata.get('main_topic', ''))
-                    # Log success inside try block, before finally
-                    if industry_analysis:
-                         logger.info("Async Industry analysis completed successfully")
-                         self._log_to_opik("Async Industry analysis complete", "industry_analysis_complete", {"challenges_count": len(industry_analysis.get('challenges', []))})
+                    industry_result = await self.industry_analyzer.analyze_industry(metadata.get('main_topic', ''))
+                    if industry_result:
+                        challenges_count = len(industry_result.get('challenges', []))
+                        logger.info(f"Async {task_name} successful: Found {challenges_count} challenges.") # Log Success
+                        self._log_to_opik(f"Async {task_name} complete", "industry_analysis_complete", {"challenges_count": challenges_count})
                 else:
-                     logger.warning("Industry analyzer not available, skipping")
-                     # Explicitly remove from pending if skipped
-                     if 'industry_analysis' in progress['pending_components']:
+                    logger.warning("Industry analyzer not available, skipping")
+                    if 'industry_analysis' in progress['pending_components']:
                          progress['pending_components'].remove('industry_analysis')
-
             except Exception as e:
-                error_msg = f"Error in industry analysis: {e}"
-                logger.error(error_msg)
+                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
                 progress['errors'].append({'component': 'industry_analysis', 'error': str(e)})
-                self._log_to_opik("Async Industry analysis error", "industry_analysis_error", {"error": str(e)})
-                # Explicitly remove from pending if error occurs
+                self._log_to_opik(f"Async {task_name} error", "industry_analysis_error", {"error": str(e)})
                 if 'industry_analysis' in progress['pending_components']:
                     progress['pending_components'].remove('industry_analysis')
-            finally: # Ensure system_affected is always set, even if analysis fails or is skipped
-                research_data['industry_analysis'] = industry_analysis # Store result (or None)
-                research_data['challenges'] = industry_analysis.get('challenges', []) if industry_analysis else []
-                # Safely initialize system_affected dictionary
-                research_data['system_affected'] = {
-                    'name': metadata.get('main_topic'),
-                    'description': industry_analysis.get('description', 'Industry analysis skipped or failed') if industry_analysis else 'Industry analysis skipped or failed',
-                    'challenges': industry_analysis.get('challenges', []) if industry_analysis else []
-                }
-                # Update progress lists only if component was actually processed
-                if industry_analysis and 'industry_analysis' in progress['pending_components']: # Check if it was processed and still pending
+            finally:
+                logger.info(f"Async {task_name} task finished.") # Log Completion
+                research_data['industry_analysis'] = industry_result
+                if industry_result and 'industry_analysis' in progress['pending_components']:
                     progress['completed_components'].append('industry_analysis')
                     progress['pending_components'].remove('industry_analysis')
-                elif not industry_analysis and 'industry_analysis' not in progress['errors'] and 'industry_analysis' in progress['pending_components']:
-                     # If skipped without error, remove from pending
-                     progress['pending_components'].remove('industry_analysis')
+                elif not industry_result and 'industry_analysis' not in progress['errors'] and 'industry_analysis' in progress['pending_components']:
+                    progress['pending_components'].remove('industry_analysis')
 
-        if hasattr(self, 'industry_analyzer') and self.industry_analyzer: # Only add task if analyzer exists
-           tasks.append(industry_task())
-        else: # Mark as skipped if not available
-             if 'industry_analysis' in progress['pending_components']:
+        if hasattr(self, 'industry_analyzer') and self.industry_analyzer:
+            tasks.append(industry_task())
+        else:
+            if 'industry_analysis' in progress['pending_components']:
                  progress['pending_components'].remove('industry_analysis')
 
         # Task 3: Solution Analysis (already async)
         async def solution_task():
-            solution_analysis = None # Initialize to None
+            solution_result = None
+            task_name = "Solution Analysis"
             try:
                 if hasattr(self, 'solution_analyzer') and self.solution_analyzer:
-                     # Wait for challenges data if possible (simple approach for now)
-                     # await asyncio.sleep(0.1) # Small delay might not be necessary if gather runs all tasks
-                     solution_analysis = await self.solution_analyzer.analyze_solution(
-                         metadata.get('main_topic', ''),
-                         metadata.get('proposed_solution_name', 'Proposed Solution'), # Need a way to get solution name
-                         research_data.get('challenges', []) # Use potentially populated challenges
-                     )
-                     if solution_analysis:
-                         logger.info("Async Solution analysis completed successfully")
-                         self._log_to_opik("Async Solution analysis complete", "solution_analysis_complete", {})
+                    # Wait for industry analysis to potentially complete first
+                    await asyncio.sleep(0.1)
+                    challenges = research_data.get('industry_analysis', {}).get('challenges', [])
+                    solution_result = await self.solution_analyzer.analyze_solution(
+                        metadata.get('main_topic', ''),
+                        metadata.get('proposed_solution', 'Proposed Solution'), # Use metadata if available
+                        challenges
+                    )
+                    if solution_result:
+                        pro_args = len(solution_result.get('pro_arguments', []))
+                        con_args = len(solution_result.get('counter_arguments', []))
+                        logger.info(f"Async {task_name} successful: Found {pro_args} pro / {con_args} con arguments.") # Log Success
+                        self._log_to_opik(f"Async {task_name} complete", "solution_analysis_complete", {"pro_args": pro_args, "con_args": con_args})
                 else:
-                     logger.warning("Solution analyzer not available, skipping")
-                     if 'solution_analysis' in progress['pending_components']:
+                    logger.warning("Solution analyzer not available, skipping")
+                    if 'solution_analysis' in progress['pending_components']:
                          progress['pending_components'].remove('solution_analysis')
-
             except Exception as e:
-                error_msg = f"Error in solution analysis: {e}"
-                logger.error(error_msg)
+                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
                 progress['errors'].append({'component': 'solution_analysis', 'error': str(e)})
-                self._log_to_opik("Async Solution analysis error", "solution_analysis_error", {"error": str(e)})
+                self._log_to_opik(f"Async {task_name} error", "solution_analysis_error", {"error": str(e)})
                 if 'solution_analysis' in progress['pending_components']:
                     progress['pending_components'].remove('solution_analysis')
-            finally: # Ensure solution data is always set
-                 research_data['solution'] = solution_analysis # Store result (or None)
-                 research_data['proposed_solution'] = { # For compatibility
-                      'name': solution_analysis.get('solution', 'Proposed Solution') if solution_analysis else 'Proposed Solution',
-                      'advantages': solution_analysis.get('pro_arguments', []) if solution_analysis else [],
-                      'limitations': solution_analysis.get('counter_arguments', []) if solution_analysis else []
-                 }
-                 if solution_analysis and 'solution_analysis' in progress['pending_components']:
+            finally:
+                logger.info(f"Async {task_name} task finished.") # Log Completion
+                research_data['solution_analysis'] = solution_result
+                if solution_result and 'solution_analysis' in progress['pending_components']:
                     progress['completed_components'].append('solution_analysis')
                     progress['pending_components'].remove('solution_analysis')
-                 elif not solution_analysis and 'solution_analysis' not in progress['errors'] and 'solution_analysis' in progress['pending_components']:
+                elif not solution_result and 'solution_analysis' not in progress['errors'] and 'solution_analysis' in progress['pending_components']:
                      progress['pending_components'].remove('solution_analysis')
 
         if hasattr(self, 'solution_analyzer') and self.solution_analyzer:
             tasks.append(solution_task())
         else:
-             if 'solution_analysis' in progress['pending_components']:
+            if 'solution_analysis' in progress['pending_components']:
                  progress['pending_components'].remove('solution_analysis')
 
         # Task 4: Paradigm Analysis (already async)
         async def paradigm_task():
-             paradigm_analysis = None # Initialize to None
-             try:
-                 if hasattr(self, 'paradigm_analyzer') and self.paradigm_analyzer:
-                     paradigm_analysis = await self.paradigm_analyzer.analyze_paradigms(metadata.get('main_topic', ''))
-                     if paradigm_analysis:
-                         logger.info("Async Paradigm analysis completed successfully")
-                         self._log_to_opik("Async Paradigm analysis complete", "paradigm_analysis_complete", {})
-                 else:
-                     logger.warning("Paradigm analyzer not available, skipping")
-                     if 'paradigm_analysis' in progress['pending_components']:
+            paradigm_result = None
+            task_name = "Paradigm Analysis"
+            try:
+                if hasattr(self, 'paradigm_analyzer') and self.paradigm_analyzer:
+                    paradigm_result = await self.paradigm_analyzer.analyze_paradigms(metadata.get('main_topic', ''))
+                    if paradigm_result:
+                        hist_p = len(paradigm_result.get('historical_paradigms', []))
+                        fut_p = len(paradigm_result.get('future_paradigms', []))
+                        logger.info(f"Async {task_name} successful: Found {hist_p} historical / {fut_p} future paradigms.") # Log Success
+                        self._log_to_opik(f"Async {task_name} complete", "paradigm_analysis_complete", {"historical_count": hist_p, "future_count": fut_p})
+                else:
+                    logger.warning("Paradigm analyzer not available, skipping")
+                    if 'paradigm_analysis' in progress['pending_components']:
                          progress['pending_components'].remove('paradigm_analysis')
-             except Exception as e:
-                  logger.error(f"Error in paradigm analysis: {e}")
-                  progress['errors'].append({'component': 'paradigm_analysis', 'error': str(e)})
-                  self._log_to_opik("Async Paradigm analysis error", "paradigm_analysis_error", {"error": str(e)})
-                  if 'paradigm_analysis' in progress['pending_components']:
-                      progress['pending_components'].remove('paradigm_analysis')
-             finally: # Ensure paradigm data is always set
-                 research_data['paradigms'] = paradigm_analysis # Store result (or None)
-                 research_data['current_paradigm'] = { # For compatibility
-                      'name': paradigm_analysis.get('historical_paradigms', [{}])[-1].get('name', 'Current Paradigm') if paradigm_analysis else 'Current Paradigm',
-                      'limitations': [] # Placeholder
-                 }
-                 if paradigm_analysis and 'paradigm_analysis' in progress['pending_components']:
-                     progress['completed_components'].append('paradigm_analysis')
-                     progress['pending_components'].remove('paradigm_analysis')
-                 elif not paradigm_analysis and 'paradigm_analysis' not in progress['errors'] and 'paradigm_analysis' in progress['pending_components']:
+            except Exception as e:
+                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
+                progress['errors'].append({'component': 'paradigm_analysis', 'error': str(e)})
+                self._log_to_opik(f"Async {task_name} error", "paradigm_analysis_error", {"error": str(e)})
+                if 'paradigm_analysis' in progress['pending_components']:
+                    progress['pending_components'].remove('paradigm_analysis')
+            finally:
+                logger.info(f"Async {task_name} task finished.") # Log Completion
+                research_data['paradigm_analysis'] = paradigm_result
+                if paradigm_result and 'paradigm_analysis' in progress['pending_components']:
+                    progress['completed_components'].append('paradigm_analysis')
+                    progress['pending_components'].remove('paradigm_analysis')
+                elif not paradigm_result and 'paradigm_analysis' not in progress['errors'] and 'paradigm_analysis' in progress['pending_components']:
                      progress['pending_components'].remove('paradigm_analysis')
 
         if hasattr(self, 'paradigm_analyzer') and self.paradigm_analyzer:
-             tasks.append(paradigm_task())
+            tasks.append(paradigm_task())
         else:
              if 'paradigm_analysis' in progress['pending_components']:
                  progress['pending_components'].remove('paradigm_analysis')
 
         # Task 5: Audience Analysis (already async)
         async def audience_task():
-            audience_analysis = None
+            audience_result = None
+            task_name = "Audience Analysis"
             try:
                 if hasattr(self, 'audience_analyzer') and self.audience_analyzer:
-                    audience_analysis = await self.audience_analyzer.analyze_audience(metadata.get('main_topic', ''))
-                    if audience_analysis:
-                        logger.info("Async Audience analysis completed successfully")
-                        self._log_to_opik("Async Audience analysis complete", "audience_analysis_complete", {})
+                    audience_result = await self.audience_analyzer.analyze_audience(metadata.get('main_topic', ''))
+                    if audience_result:
+                         segments_count = len(audience_result.get('segments', []))
+                         logger.info(f"Async {task_name} successful: Found {segments_count} audience segments.") # Log Success
+                         self._log_to_opik(f"Async {task_name} complete", "audience_analysis_complete", {"segments_count": segments_count})
                 else:
                     logger.warning("Audience analyzer not available, skipping")
                     if 'audience_analysis' in progress['pending_components']:
-                        progress['pending_components'].remove('audience_analysis')
+                         progress['pending_components'].remove('audience_analysis')
             except Exception as e:
-                logger.error(f"Error in audience analysis: {e}")
+                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
                 progress['errors'].append({'component': 'audience_analysis', 'error': str(e)})
-                self._log_to_opik("Async Audience analysis error", "audience_analysis_error", {"error": str(e)})
+                self._log_to_opik(f"Async {task_name} error", "audience_analysis_error", {"error": str(e)})
                 if 'audience_analysis' in progress['pending_components']:
-                    progress['pending_components'].remove('audience_analysis')
+                     progress['pending_components'].remove('audience_analysis')
             finally:
-                research_data['audience'] = audience_analysis
-                if audience_analysis and 'audience_analysis' in progress['pending_components']:
+                logger.info(f"Async {task_name} task finished.") # Log Completion
+                research_data['audience_analysis'] = audience_result
+                if audience_result and 'audience_analysis' in progress['pending_components']:
                     progress['completed_components'].append('audience_analysis')
                     progress['pending_components'].remove('audience_analysis')
-                elif not audience_analysis and 'audience_analysis' not in progress['errors'] and 'audience_analysis' in progress['pending_components']:
-                    progress['pending_components'].remove('audience_analysis')
+                elif not audience_result and 'audience_analysis' not in progress['errors'] and 'audience_analysis' in progress['pending_components']:
+                     progress['pending_components'].remove('audience_analysis')
 
         if hasattr(self, 'audience_analyzer') and self.audience_analyzer:
             tasks.append(audience_task())
         else:
             if 'audience_analysis' in progress['pending_components']:
-                progress['pending_components'].remove('audience_analysis')
+                 progress['pending_components'].remove('audience_analysis')
 
         # Task 6: Analogy Generation (already async)
         async def analogy_task():
             analogy_result = None
+            task_name = "Analogy Generation"
             try:
                 if hasattr(self, 'analogy_generator') and self.analogy_generator:
-                    # Wait for challenges and solution data to be potentially available
-                    await asyncio.sleep(0.2) # Allow some time for other tasks
-                    
-                    # --- MODIFIED CALL ---
-                    # Assuming generate_analogies expects topic and challenges (3 args total: self, topic, challenges)
-                    # If it expects topic and solution, change research_data.get('challenges', []) to research_data.get('solution', {})
-                    # If it expects topic and all research_data, change to research_data
-                    analogy_result = await self.analogy_generator.generate_analogies(
-                        metadata.get('main_topic', ''),
-                        research_data.get('challenges', []) 
-                        # Removed: research_data.get('solution', {}) 
-                    )
-                    # --- END MODIFIED CALL ---
+                    await asyncio.sleep(0.2)
+                    # Assuming generate_analogies now takes only the concept
+                    # We might need to adjust based on AnalogyGenerator's final design
+                    # Let's assume it primarily needs the main topic for now.
+                    analogy_result = await self.analogy_generator.generate_analogies(metadata.get('main_topic', ''))
 
                     if analogy_result:
-                        logger.info("Async Analogy generation completed successfully")
-                        self._log_to_opik("Async Analogy generation complete", "analogy_generation_complete", {})
+                        gen_count = len(analogy_result.get('generated_analogies', []))
+                        ex_count = len(analogy_result.get('existing_analogies', []))
+                        logger.info(f"Async {task_name} successful: Found {gen_count} generated / {ex_count} existing analogies.") # Log Success
+                        self._log_to_opik("Async Analogy generation complete", "analogy_generation_complete", {"generated": gen_count, "existing": ex_count})
                 else:
                     logger.warning("Analogy generator not available, skipping")
                     if 'analogy_generation' in progress['pending_components']:
                         progress['pending_components'].remove('analogy_generation')
             except Exception as e:
-                # Use f-string for clearer error logging
-                logger.error(f"Error in analogy generation: {e}") 
+                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
                 progress['errors'].append({'component': 'analogy_generation', 'error': str(e)})
                 self._log_to_opik("Async Analogy generation error", "analogy_generation_error", {"error": str(e)})
                 if 'analogy_generation' in progress['pending_components']:
                     progress['pending_components'].remove('analogy_generation')
             finally:
+                logger.info(f"Async {task_name} task finished.") # Log Completion
                 research_data['analogies'] = analogy_result
                 if analogy_result and 'analogy_generation' in progress['pending_components']:
                     progress['completed_components'].append('analogy_generation')
@@ -779,31 +785,31 @@ class ResearcherAgent:
         # Task 7: Visual Asset Collection (already async)
         async def visual_asset_task():
             visual_assets_result = None
+            task_name = "Visual Asset Collection"
             try:
                 if hasattr(self, 'visual_asset_collector') and self.visual_asset_collector:
-                    # Wait for solution and paradigm data
-                    await asyncio.sleep(0.3) # Allow more time
+                    await asyncio.sleep(0.3)
                     visual_assets_result = await self.visual_asset_collector.analyze_visual_assets(
                         metadata.get('main_topic', ''),
-                        research_data.get('solution', {}),
-                        research_data.get('paradigms', {})
+                        research_data.get('solution_analysis', {}), # Pass analysis data
+                        research_data.get('paradigm_analysis', {}) # Pass analysis data
                     )
                     if visual_assets_result:
-                        logger.info("Async Visual asset collection completed successfully")
-                        self._log_to_opik("Async Visual asset collection complete", "visual_asset_collection_complete", {})
+                        total_visuals = visual_assets_result.get('stats', {}).get('total_visuals', 0)
+                        logger.info(f"Async {task_name} successful: Collected {total_visuals} visuals.") # Log Success
+                        self._log_to_opik("Async Visual asset collection complete", "visual_asset_collection_complete", {"count": total_visuals})
                 else:
-                    # Log skip only if it exists in pending list
                     if 'visual_asset_collection' in progress['pending_components']:
                         logger.warning("Visual asset collector not available, skipping")
                         progress['pending_components'].remove('visual_asset_collection')
-
             except Exception as e:
-                logger.error(f"Error in visual asset collection: {e}")
+                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
                 progress['errors'].append({'component': 'visual_asset_collection', 'error': str(e)})
                 self._log_to_opik("Async Visual asset collection error", "visual_asset_collection_error", {"error": str(e)})
                 if 'visual_asset_collection' in progress['pending_components']:
                     progress['pending_components'].remove('visual_asset_collection')
             finally:
+                logger.info(f"Async {task_name} task finished.") # Log Completion
                 research_data['visual_assets'] = visual_assets_result
                 if visual_assets_result and 'visual_asset_collection' in progress['pending_components']:
                     progress['completed_components'].append('visual_asset_collection')
