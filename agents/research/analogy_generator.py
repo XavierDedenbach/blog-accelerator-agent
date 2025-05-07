@@ -15,6 +15,7 @@ import json
 from datetime import datetime
 import asyncio
 import inspect
+import re
 
 from langchain.callbacks.manager import CallbackManagerForChainRun
 from langchain.chains.llm import LLMChain
@@ -254,15 +255,11 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             )
             
             # Parse JSON response
-            analogies = json.loads(response)
+            analogies = self._parse_llm_response_to_json(response, f"domain analogies for {concept}")
             
             logger.info(f"Generated {len(analogies)} analogies for concept: {concept}")
             return analogies
             
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON Parsing Error generating analogies for {concept}: {e}")
-            logger.error(f"LLM Response was: {response}")
-            raise AnalogyGenerationError(f"Failed to parse analogies JSON: {e}")
         except Exception as e:
             logger.error(f"Error generating analogies for {concept}: {e}")
             raise AnalogyGenerationError(f"Failed to generate analogies: {e}")
@@ -305,15 +302,11 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             )
             
             # Parse JSON response
-            evaluation = json.loads(response)
+            evaluation = self._parse_llm_response_to_json(response, f"evaluation for {analogy.get('title', 'Untitled')}")
             
             logger.info(f"Evaluated analogy: {analogy.get('title', 'Untitled')} - Score: {evaluation.get('overall_score', 0)}/10")
             return evaluation
             
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON Parsing Error evaluating analogy {analogy.get('title', 'Untitled')}: {e}")
-            logger.error(f"LLM Response was: {response}")
-            raise AnalogyGenerationError(f"Failed to parse evaluation JSON: {e}")
         except Exception as e:
             logger.error(f"Error evaluating analogy {analogy.get('title', 'Untitled')}: {e}")
             raise AnalogyGenerationError(f"Failed to evaluate analogy: {e}")
@@ -373,15 +366,11 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             )
             
             # Parse JSON response
-            refined_analogy = json.loads(response)
+            refined_analogy = self._parse_llm_response_to_json(response, f"refined analogy for {analogy.get('title', 'Untitled')}")
             
             logger.info(f"Refined analogy: {analogy.get('title', 'Untitled')} -> {refined_analogy.get('title', 'Untitled')}")
             return refined_analogy
             
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON Parsing Error refining analogy {analogy.get('title', 'Untitled')}: {e}")
-            logger.error(f"LLM Response was: {response}")
-            raise AnalogyGenerationError(f"Failed to parse refined analogy JSON: {e}")
         except Exception as e:
             logger.error(f"Error refining analogy {analogy.get('title', 'Untitled')}: {e}")
             raise AnalogyGenerationError(f"Failed to refine analogy: {e}")
@@ -433,15 +422,11 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             )
             
             # Parse JSON response
-            existing_analogies = json.loads(response)
+            existing_analogies = self._parse_llm_response_to_json(response, f"existing analogies for {concept}")
             
             logger.info(f"Found {len(existing_analogies)} existing analogies for concept: {concept}")
             return existing_analogies
             
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON Parsing Error searching existing analogies for {concept}: {e}")
-            logger.error(f"LLM Response was: {response}")
-            raise AnalogyGenerationError(f"Failed to parse existing analogies JSON: {e}")
         except Exception as e:
             logger.error(f"Error searching existing analogies for {concept}: {e}")
             raise AnalogyGenerationError(f"Failed to search existing analogies: {e}")
@@ -470,52 +455,58 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             
             # Use FirecrawlClient to find visual assets
             visual_assets = []
-            try:
-                if self.firecrawl_client:
+            if self.firecrawl_client:
+                try:
                     # Attempt Firecrawl first
+                    logger.info(f"Attempting Firecrawl image search for: {query}")
                     firecrawl_result = self.firecrawl_client.search_images(query)
                     if inspect.isawaitable(firecrawl_result):
                         visual_assets = await firecrawl_result
                     else:
                         visual_assets = firecrawl_result # Assume direct result if not awaitable
+                    logger.info(f"Firecrawl found {len(visual_assets)} assets.")
+                except Exception as e:
+                    logger.error(f"Firecrawl client error during image search for '{query}': {e}", exc_info=True)
+                    visual_assets = [] # Ensure visual_assets is empty on Firecrawl error
+            
+            # If no images found with Firecrawl or Firecrawl client not available/failed, try Brave API fallback
+            if not visual_assets and self.source_validator:
+                logger.info(f"Falling back to Brave API for images for analogy: {analogy.get('title', 'Untitled')}")
+                try:
+                    # Call search_web
+                    search_result_or_coroutine = self.source_validator.search_web(f"{query} image", count=5)
 
-                # If no images found with Firecrawl or Firecrawl client not available, try Brave API fallback
-                if not visual_assets and self.source_validator:
-                    logger.info(f"Falling back to Brave API for images for analogy: {analogy.get('title', 'Untitled')}")
-                    try:
-                        # Call search_web
-                        search_result_or_coroutine = self.source_validator.search_web(f"{query} image", count=5)
+                    # Check if the result needs to be awaited
+                    if inspect.isawaitable(search_result_or_coroutine):
+                        search_results = await search_result_or_coroutine
+                    else:
+                        # Assume it returned the result directly
+                        search_results = search_result_or_coroutine
 
-                        # Check if the result needs to be awaited
-                        if inspect.isawaitable(search_result_or_coroutine):
-                            search_results = await search_result_or_coroutine
-                        else:
-                            # Assume it returned the result directly
-                            search_results = search_result_or_coroutine
-
-                        # Ensure search_results is iterable (e.g., a list) before processing
-                        if isinstance(search_results, list):
-                            # Format results as visual assets
-                            visual_assets = [
-                                {
-                                    "url": result.get("url", ""),
-                                    "title": result.get("title", ""),
-                                    "description": result.get("description", ""),
-                                    "source": result.get("source", "Brave Search") # Default source if missing
-                                }
-                                for result in search_results
-                            ]
-                        else:
-                            logger.warning(f"Brave search fallback for {analogy.get('title', 'Untitled')} did not return a list. Received: {type(search_results)}")
-                            visual_assets = [] # Keep visual_assets empty if search failed
-                    except Exception as e:
-                        # Log the specific error during Brave fallback
-                        logger.error(f"Error searching for images with Brave API fallback: {e}", exc_info=True)
-                        visual_assets = [] # Ensure visual_assets remains empty on error
-            except Exception as e:
-                # Catch errors during the initial Firecrawl attempt or general errors
-                logger.error(f"Error searching for images: {e}", exc_info=True) # Added exc_info for more detail
-                visual_assets = []
+                    # Ensure search_results is iterable (e.g., a list) before processing
+                    if isinstance(search_results, list):
+                        # Format results as visual assets
+                        visual_assets = [
+                            {
+                                "url": result.get("url", ""),
+                                "title": result.get("title", ""),
+                                "description": result.get("description", ""),
+                                "source": result.get("source", "Brave Search") # Default source if missing
+                            }
+                            for result in search_results
+                        ]
+                        logger.info(f"Brave fallback found {len(visual_assets)} assets.")
+                    else:
+                        logger.warning(f"Brave search fallback for {analogy.get('title', 'Untitled')} did not return a list. Received: {type(search_results)}")
+                        visual_assets = [] # Keep visual_assets empty if search failed
+                except Exception as e:
+                    # Log the specific error during Brave fallback
+                    logger.error(f"Error searching for images with Brave API fallback: {e}", exc_info=True)
+                    visual_assets = [] # Ensure visual_assets remains empty on error
+            
+            # This outer try-except is for any other unexpected errors in the whole visual generation process.
+            # The specific Firecrawl and Brave errors are handled above.
+            # If visual_assets is still empty here, it means neither succeeded or both failed gracefully setting it to [].
 
             if not visual_assets:
                 logger.warning(f"No visual assets found for analogy: {analogy.get('title', 'Untitled')}")
@@ -568,36 +559,37 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             
             for analogy in initial_analogies:
                 logger.info(f"Evaluating analogy: {analogy.get('title', '')}")
+                evaluated_analogy_for_refinement = analogy # Start with the original
                 try:
                     evaluation = await self.evaluate_analogy(concept, analogy, llm_override=llm_override)
-                    
-                    # Ensure evaluation and score exist and are floats before comparison
                     overall_score = evaluation.get('overall_score')
+                    
                     if isinstance(overall_score, (int, float)):
                         logger.info(f"Evaluated analogy: {analogy.get('title', '')} - Score: {overall_score:.1f}/10")
-                        evaluated_analogy = {**analogy, "evaluation": evaluation}
-                        evaluated_analogies.append(evaluated_analogy)
+                        evaluated_analogy_for_refinement = {**analogy, "evaluation": evaluation}
+                        evaluated_analogies.append(evaluated_analogy_for_refinement)
                         
-                        # Refine if below threshold
                         if overall_score < refinement_threshold:
                             logger.info(f"Refining analogy: {analogy.get('title', '')} (Score: {overall_score:.1f})")
-                            refined_analogy = await self.refine_analogy(concept, analogy, evaluation, llm_override=llm_override)
-                            refined_analogies.append(refined_analogy)
+                            refined_analogy_object = await self.refine_analogy(concept, analogy, evaluation, llm_override=llm_override)
+                            # Add the refined analogy to the list that will become final_analogies
+                            refined_analogies.append(refined_analogy_object) 
                         else:
-                            # Keep the original if score is good enough
-                            refined_analogies.append(evaluated_analogy) # Add the evaluated version
+                            # Keep the evaluated (but not refined) analogy
+                            refined_analogies.append(evaluated_analogy_for_refinement)
                     else:
-                        logger.warning(f"Could not evaluate analogy '{analogy.get('title', '')}' properly, score missing or invalid. Skipping.")
-                        # Optionally keep the original unevaluated analogy
-                        # refined_analogies.append(analogy) 
+                        logger.warning(f"Could not evaluate analogy '{analogy.get('title', '')}' properly, score missing or invalid. Keeping original.")
+                        # If evaluation itself fails to produce a score, keep the original analogy
+                        refined_analogies.append(analogy) 
                         
                 except Exception as e:
-                     logger.error(f"Error evaluating or refining analogy '{analogy.get('title', '')}': {e}")
-                     # Optionally keep the original unevaluated analogy
-                     # refined_analogies.append(analogy) 
+                     logger.error(f"Error evaluating or refining analogy '{analogy.get('title', '')}': {e}. Keeping original analogy.")
+                     # If any error occurs during evaluation or refinement, keep the original analogy
+                     refined_analogies.append(analogy) 
 
-            # Generate visual representations
-            logger.info(f"Generating visual representations for {len(refined_analogies)} refined analogies")
+            # Generate visual representations for the analogies that made it to the refined_analogies list
+            # (this list now contains originals if eval/refine failed, evaluated ones if score was high, or refined ones)
+            logger.info(f"Generating visual representations for {len(refined_analogies)} analogies")
             visual_results = await asyncio.gather(*[self.generate_visual_representation(a) for a in refined_analogies])
             
             # Integrate visual results into refined_analogies
@@ -650,4 +642,25 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             
         except Exception as e:
             logger.error(f"Error in analogy generation for {concept}: {e}")
-            raise AnalogyGenerationError(f"Failed to complete analogy generation: {e}") 
+            raise AnalogyGenerationError(f"Failed to complete analogy generation: {e}")
+    
+    def _parse_llm_response_to_json(self, response_text: str, context: str) -> Any:
+        """Helper to parse LLM JSON response, stripping markdown and handling errors."""
+        # Attempt to extract JSON from markdown code block using regex
+        match = re.match(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", response_text, re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            json_str = match.group(1).strip()
+        else:
+            # If no markdown fence pattern is matched, assume the response_text is the JSON string itself
+            json_str = response_text.strip()
+
+        logger.debug(f"Attempting to parse JSON for '{context}' (first 1000 chars): '{json_str[:1000]}'")
+
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error {context}: {e}")
+            logger.error(f"LLM Response (after attempted cleaning for '{context}') was: {json_str}")
+            logger.error(f"Original LLM Response (for '{context}') was: {response_text}")
+            raise AnalogyGenerationError(f"Failed to parse {context} JSON: {e}") from e 

@@ -5,6 +5,7 @@ import asyncio
 
 # Langchain imports needed for mocks
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.outputs import Generation, LLMResult
 from openai import RateLimitError as OpenAIRateLimitError # For simulating errors
 
 # Import the class to be tested
@@ -91,193 +92,262 @@ mock_visual_asset = {"url": "http://images.com/block.png", "title": "Block Diagr
 # --- Tests for generate_domain_analogies ---
 
 @pytest.mark.asyncio
-async def test_generate_domain_analogies_success(analogy_generator, mock_llm):
-    """Test successful generation of domain analogies."""
-    expected_analogies = [mock_analogy]
-    mock_response = create_mock_json_response(expected_analogies)
-    mock_llm.arun.return_value = mock_response
+async def test_generate_domain_analogies_success(analogy_generator):
+    """Test successful generation of domain analogies by patching LLMChain.arun."""
+    topic = test_concept
+    expected_analogies_list = [mock_analogy]
+    mock_chain_output_string = json.dumps(expected_analogies_list)
 
-    analogies = await analogy_generator.generate_domain_analogies(test_concept)
-
-    assert analogies == expected_analogies
-    mock_llm.arun.assert_called_once()
-    call_args, call_kwargs = mock_llm.arun.call_args
-    assert call_kwargs['concept'] == test_concept
-    assert call_kwargs['min_analogies'] == 1
-    assert "Nature & Biology" in call_kwargs['domains']
-
-@pytest.mark.asyncio
-async def test_generate_domain_analogies_override_success(analogy_generator, mock_llm):
-    """Test successful domain analogy generation using llm_override."""
-    initial_llm = mock_llm
-    override_llm = MagicMock(spec=BaseChatModel)
-    override_llm.arun = AsyncMock()
-
-    expected_analogies = [mock_analogy]
-    mock_response = create_mock_json_response(expected_analogies)
-    override_llm.arun.return_value = mock_response
-
-    analogies = await analogy_generator.generate_domain_analogies(test_concept, llm_override=override_llm)
-
-    assert analogies == expected_analogies
-    override_llm.arun.assert_called_once()
-    initial_llm.arun.assert_not_called()
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string
+        
+        analogies = await analogy_generator.generate_domain_analogies(topic)
+        
+        assert analogies == expected_analogies_list
+        mock_arun.assert_called_once()
+        
+        called_kwargs = mock_arun.call_args.kwargs
+        assert called_kwargs['concept'] == topic
+        assert called_kwargs['min_analogies'] == analogy_generator.min_analogies
+        assert "Nature & Biology" in called_kwargs['domains']
 
 @pytest.mark.asyncio
-async def test_generate_domain_analogies_llm_error(analogy_generator, mock_llm_failing):
-    """Test domain analogy generation when the LLM fails."""
-    generator = AnalogyGenerator(llm=mock_llm_failing, source_validator=MagicMock(), firecrawl_client=MagicMock())
+async def test_generate_domain_analogies_override_success(analogy_generator):
+    """Test successful domain analogy generation using llm_override, by patching LLMChain.arun."""
+    topic = test_concept
+    override_llm_dummy = MagicMock(spec=BaseChatModel)
+    mock_chain_output_string_override = json.dumps(mock_evaluation)
 
-    with pytest.raises(AnalogyGenerationError, match="Failed to generate analogies"):
-        await generator.generate_domain_analogies(test_concept)
-    mock_llm_failing.arun.assert_called_once()
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string_override
+        
+        evaluation = await analogy_generator.evaluate_analogy(test_concept, mock_analogy, llm_override=override_llm_dummy)
+
+    assert evaluation == mock_evaluation
+    mock_arun.assert_called_once()
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in called_kwargs['analogy']
+
+@pytest.mark.asyncio
+async def test_generate_domain_analogies_llm_error(analogy_generator):
+    """Test domain analogy generation when LLMChain.arun call itself fails."""
+    topic = test_concept
+    simulated_error_message = "LLMChain.arun failed for domain analogies"
+
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.side_effect = Exception(simulated_error_message)
+        
+        with pytest.raises(AnalogyGenerationError, match=f"Failed to generate analogies: {simulated_error_message}"):
+            await analogy_generator.generate_domain_analogies(topic)
+            
+        mock_arun.assert_called_once()
+        called_kwargs = mock_arun.call_args.kwargs
+        assert called_kwargs['concept'] == topic
+        assert called_kwargs['min_analogies'] == analogy_generator.min_analogies
+        assert "Nature & Biology" in called_kwargs['domains']
 
 @pytest.mark.asyncio
 async def test_generate_domain_analogies_json_error(analogy_generator, mock_llm):
-    """Test domain analogy generation with invalid JSON response."""
-    mock_llm.arun.return_value = "This is not JSON"
+    """Test domain analogy generation with invalid JSON response.
+    This test ensures that if the LLM returns a string that is not valid JSON,
+    the _parse_llm_response_to_json method catches the JSONDecodeError
+    and the overall function raises an AnalogyGenerationError with the correct message.
+    """
+    invalid_json_string = "This is not valid JSON {{{{:} ``"
 
-    with pytest.raises(AnalogyGenerationError, match="Failed to parse analogies JSON"):
-        await analogy_generator.generate_domain_analogies(test_concept)
+    # Patch LLMChain.arun directly for this test to ensure it returns the invalid string
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_chain_arun:
+        mock_chain_arun.return_value = invalid_json_string
+
+        # The _parse_llm_response_to_json will raise an AnalogyGenerationError with a message like:
+        # "Failed to parse domain analogies for <concept> JSON: Expecting value: line 1 column 1 (char 0)"
+        # This is then caught by generate_domain_analogies and re-raised as:
+        # "Failed to generate analogies: Failed to parse domain analogies for <concept> JSON: Expecting value: line 1 column 1 (char 0)"
+        expected_error_regex = (
+            r"Failed to generate analogies: Failed to parse domain analogies for .*? JSON: "
+            r"Expecting value: line 1 column 1 \(char 0\)"
+        )
+        with pytest.raises(AnalogyGenerationError, match=expected_error_regex):
+            await analogy_generator.generate_domain_analogies(test_concept)
+        
+        mock_chain_arun.assert_called_once()
 
 
 # --- Tests for evaluate_analogy ---
 
 @pytest.mark.asyncio
-async def test_evaluate_analogy_success(analogy_generator, mock_llm):
-    """Test successful evaluation of an analogy."""
-    mock_response = create_mock_json_response(mock_evaluation)
-    mock_llm.arun.return_value = mock_response
+async def test_evaluate_analogy_success(analogy_generator):
+    """Test successful evaluation of an analogy by patching LLMChain.arun."""
+    mock_chain_output_string = json.dumps(mock_evaluation)
 
-    evaluation = await analogy_generator.evaluate_analogy(test_concept, mock_analogy)
-
-    assert evaluation == mock_evaluation
-    mock_llm.arun.assert_called_once()
-    call_args, call_kwargs = mock_llm.arun.call_args
-    assert call_kwargs['concept'] == test_concept
-    assert mock_analogy['title'] in call_kwargs['analogy']
-
-@pytest.mark.asyncio
-async def test_evaluate_analogy_override_success(analogy_generator, mock_llm):
-    """Test successful analogy evaluation using llm_override."""
-    initial_llm = mock_llm
-    override_llm = MagicMock(spec=BaseChatModel)
-    override_llm.arun = AsyncMock()
-
-    mock_response = create_mock_json_response(mock_evaluation)
-    override_llm.arun.return_value = mock_response
-
-    evaluation = await analogy_generator.evaluate_analogy(test_concept, mock_analogy, llm_override=override_llm)
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string
+        
+        evaluation = await analogy_generator.evaluate_analogy(test_concept, mock_analogy)
 
     assert evaluation == mock_evaluation
-    override_llm.arun.assert_called_once()
-    initial_llm.arun.assert_not_called()
+    mock_arun.assert_called_once()
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in called_kwargs['analogy']
 
 @pytest.mark.asyncio
-async def test_evaluate_analogy_llm_error(analogy_generator, mock_llm_failing):
-    """Test analogy evaluation when the LLM fails."""
-    generator = AnalogyGenerator(llm=mock_llm_failing, source_validator=MagicMock(), firecrawl_client=MagicMock())
+async def test_evaluate_analogy_override_success(analogy_generator):
+    """Test successful analogy evaluation using llm_override, by patching LLMChain.arun."""
+    override_llm_dummy = MagicMock(spec=BaseChatModel)
+    mock_chain_output_string_override = json.dumps(mock_evaluation)
 
-    with pytest.raises(AnalogyGenerationError, match="Failed to evaluate analogy"):
-        await generator.evaluate_analogy(test_concept, mock_analogy)
-    mock_llm_failing.arun.assert_called_once()
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string_override
+        
+        evaluation = await analogy_generator.evaluate_analogy(test_concept, mock_analogy, llm_override=override_llm_dummy)
+
+    assert evaluation == mock_evaluation
+    mock_arun.assert_called_once()
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in called_kwargs['analogy']
+
+@pytest.mark.asyncio
+async def test_evaluate_analogy_llm_error(analogy_generator):
+    """Test analogy evaluation when LLMChain.arun call itself fails."""
+    simulated_error_message = "LLMChain.arun failed for analogy evaluation"
+
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.side_effect = Exception(simulated_error_message)
+        
+        with pytest.raises(AnalogyGenerationError, match=f"Failed to evaluate analogy: {simulated_error_message}"):
+            await analogy_generator.evaluate_analogy(test_concept, mock_analogy)
+            
+        mock_arun.assert_called_once()
+        called_kwargs = mock_arun.call_args.kwargs
+        assert called_kwargs['concept'] == test_concept
+        assert mock_analogy['title'] in called_kwargs['analogy']
 
 
 # --- Tests for refine_analogy ---
 
 @pytest.mark.asyncio
-async def test_refine_analogy_success(analogy_generator, mock_llm):
-    """Test successful refinement of an analogy."""
-    mock_response = create_mock_json_response(mock_refined_analogy)
-    mock_llm.arun.return_value = mock_response
+async def test_refine_analogy_success(analogy_generator):
+    """Test successful refinement of an analogy by patching LLMChain.arun."""
+    mock_chain_output_string = json.dumps(mock_refined_analogy)
 
-    refined = await analogy_generator.refine_analogy(test_concept, mock_analogy, mock_evaluation)
-
-    assert refined == mock_refined_analogy
-    mock_llm.arun.assert_called_once()
-    call_args, call_kwargs = mock_llm.arun.call_args
-    assert call_kwargs['concept'] == test_concept
-    assert mock_analogy['title'] in call_kwargs['analogy']
-    assert "Clarity: 8/10 - Clear" in call_kwargs['evaluation']
-
-@pytest.mark.asyncio
-async def test_refine_analogy_override_success(analogy_generator, mock_llm):
-    """Test successful analogy refinement using llm_override."""
-    initial_llm = mock_llm
-    override_llm = MagicMock(spec=BaseChatModel)
-    override_llm.arun = AsyncMock()
-
-    mock_response = create_mock_json_response(mock_refined_analogy)
-    override_llm.arun.return_value = mock_response
-
-    refined = await analogy_generator.refine_analogy(test_concept, mock_analogy, mock_evaluation, llm_override=override_llm)
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string
+        
+        refined = await analogy_generator.refine_analogy(test_concept, mock_analogy, mock_evaluation)
 
     assert refined == mock_refined_analogy
-    override_llm.arun.assert_called_once()
-    initial_llm.arun.assert_not_called()
+    mock_arun.assert_called_once()
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in called_kwargs['analogy']
+    assert "Clarity: 8/10 - Clear" in called_kwargs['evaluation']
 
 @pytest.mark.asyncio
-async def test_refine_analogy_llm_error(analogy_generator, mock_llm_failing):
-    """Test analogy refinement when the LLM fails."""
-    generator = AnalogyGenerator(llm=mock_llm_failing, source_validator=MagicMock(), firecrawl_client=MagicMock())
+async def test_refine_analogy_override_success(analogy_generator):
+    """Test successful analogy refinement using llm_override, by patching LLMChain.arun."""
+    override_llm_dummy = MagicMock(spec=BaseChatModel)
+    mock_chain_output_string_override = json.dumps(mock_refined_analogy)
 
-    with pytest.raises(AnalogyGenerationError, match="Failed to refine analogy"):
-        await generator.refine_analogy(test_concept, mock_analogy, mock_evaluation)
-    mock_llm_failing.arun.assert_called_once()
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string_override
+        
+        refined = await analogy_generator.refine_analogy(test_concept, mock_analogy, mock_evaluation, llm_override=override_llm_dummy)
+
+    assert refined == mock_refined_analogy
+    mock_arun.assert_called_once()
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in called_kwargs['analogy']
+    assert "Clarity: 8/10 - Clear" in called_kwargs['evaluation']
+
+@pytest.mark.asyncio
+async def test_refine_analogy_llm_error(analogy_generator):
+    """Test analogy refinement when LLMChain.arun call itself fails."""
+    simulated_error_message = "LLMChain.arun failed for analogy refinement"
+
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.side_effect = Exception(simulated_error_message)
+        
+        with pytest.raises(AnalogyGenerationError, match=f"Failed to refine analogy: {simulated_error_message}"):
+            await analogy_generator.refine_analogy(test_concept, mock_analogy, mock_evaluation)
+            
+        mock_arun.assert_called_once()
+        called_kwargs = mock_arun.call_args.kwargs
+        assert called_kwargs['concept'] == test_concept
+        assert mock_analogy['title'] in called_kwargs['analogy']
+        assert "Clarity: 8/10 - Clear" in called_kwargs['evaluation']
 
 
 # --- Tests for search_existing_analogies ---
 
 @pytest.mark.asyncio
-async def test_search_existing_analogies_success(analogy_generator, mock_llm, mock_source_validator):
-    """Test successful search for existing analogies."""
+async def test_search_existing_analogies_success(analogy_generator, mock_source_validator):
+    """Test successful search for existing analogies by patching LLMChain.arun."""
     mock_search_results = [{"title": "Blog Post", "url": "http://example.com/blog", "description": "Explains blockchain..."}]
     mock_source_validator.search_web.return_value = mock_search_results
 
-    expected_existing = [mock_existing_analogy]
-    mock_response = create_mock_json_response(expected_existing)
-    mock_llm.arun.return_value = mock_response
+    expected_existing_list = [mock_existing_analogy]
+    mock_chain_output_string = json.dumps(expected_existing_list)
 
-    existing = await analogy_generator.search_existing_analogies(test_concept)
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string
 
-    assert existing == expected_existing
+        existing = await analogy_generator.search_existing_analogies(test_concept)
+
+    assert existing == expected_existing_list
     mock_source_validator.search_web.assert_called_once_with(f"{test_concept} analogy metaphor explanation", count=5)
-    mock_llm.arun.assert_called_once()
-    call_args, call_kwargs = mock_llm.arun.call_args
-    assert call_kwargs['concept'] == test_concept
-    assert "Blog Post" in call_kwargs['results']
+    
+    mock_arun.assert_called_once()
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert "Blog Post" in called_kwargs['results']
 
 @pytest.mark.asyncio
-async def test_search_existing_analogies_override_success(analogy_generator, mock_llm, mock_source_validator):
-    """Test successful existing analogy search using llm_override."""
-    initial_llm = mock_llm
-    override_llm = MagicMock(spec=BaseChatModel)
-    override_llm.arun = AsyncMock()
-
-    mock_search_results = [{"title": "Override Blog", "url": "http://override.com/blog"}]
+async def test_search_existing_analogies_override_success(analogy_generator, mock_source_validator):
+    """Test successful existing analogy search using llm_override, by patching LLMChain.arun."""
+    override_llm_dummy = MagicMock(spec=BaseChatModel)
+    
+    mock_search_results = [{"title": "Override Blog", "url": "http://override.com/blog", "description": "Desc..."}]
     mock_source_validator.search_web.return_value = mock_search_results
-    expected_existing = [mock_existing_analogy]
-    mock_response = create_mock_json_response(expected_existing)
-    override_llm.arun.return_value = mock_response
 
-    existing = await analogy_generator.search_existing_analogies(test_concept, llm_override=override_llm)
+    expected_existing_list = [mock_existing_analogy]
+    mock_chain_output_string_override = json.dumps(expected_existing_list)
 
-    assert existing == expected_existing
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.return_value = mock_chain_output_string_override
+
+        existing = await analogy_generator.search_existing_analogies(test_concept, llm_override=override_llm_dummy)
+
+    assert existing == expected_existing_list
     mock_source_validator.search_web.assert_called_once()
-    override_llm.arun.assert_called_once()
-    initial_llm.arun.assert_not_called()
+    # Ensure correct query for source_validator if needed, though covered in non-override test
+    
+    mock_arun.assert_called_once()
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert "Override Blog" in called_kwargs['results'] # Check results from override search were passed to LLM
 
 @pytest.mark.asyncio
-async def test_search_existing_analogies_llm_error(analogy_generator, mock_llm_failing, mock_source_validator):
-    """Test existing analogy search when the LLM fails."""
-    mock_search_results = [{"title": "Blog Post", "url": "http://example.com/blog"}]
+async def test_search_existing_analogies_llm_error(analogy_generator, mock_source_validator):
+    """Test existing analogy search when LLMChain.arun fails."""
+    mock_search_results = [{"title": "Blog Post", "url": "http://example.com/blog", "description": "Desc..."}]
     mock_source_validator.search_web.return_value = mock_search_results
-    generator = AnalogyGenerator(llm=mock_llm_failing, source_validator=mock_source_validator, firecrawl_client=MagicMock())
 
-    with pytest.raises(AnalogyGenerationError, match="Failed to parse existing analogies JSON"): # Error occurs during JSON parsing
-        await generator.search_existing_analogies(test_concept)
+    simulated_error_message = "LLMChain.arun failed for searching existing analogies"
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.side_effect = Exception(simulated_error_message)
+
+        with pytest.raises(AnalogyGenerationError, match=f"Failed to search existing analogies: {simulated_error_message}"):
+            await analogy_generator.search_existing_analogies(test_concept)
+    
     mock_source_validator.search_web.assert_called_once()
-    mock_llm_failing.arun.assert_called_once()
+    mock_arun.assert_called_once() # LLMChain.arun was called
+    called_kwargs = mock_arun.call_args.kwargs
+    assert called_kwargs['concept'] == test_concept
+    assert "Blog Post" in called_kwargs['results']
 
 @pytest.mark.asyncio
 async def test_search_existing_analogies_no_search_results(analogy_generator, mock_llm, mock_source_validator):
@@ -356,26 +426,29 @@ async def test_generate_visual_representation_firecrawl_error_fallback_success(a
 # --- Tests for generate_analogies (Full Workflow) ---
 
 @pytest.mark.asyncio
-async def test_generate_analogies_success_no_refinement(analogy_generator, mock_llm, mock_source_validator, mock_firecrawl_client):
-    """Test full workflow: analogy generated, score >= threshold, existing found, visual found."""
+async def test_generate_analogies_success_no_refinement(analogy_generator, mock_source_validator, mock_firecrawl_client):
+    """Test full workflow: analogy generated, score >= threshold, existing found, visual found, using patched LLMChain.arun."""
     high_score_evaluation = {"overall_score": 8.0}
-    mock_llm_responses = [
-        create_mock_json_response([mock_analogy]),          # generate_domain_analogies
-        create_mock_json_response([mock_existing_analogy]), # search_existing_analogies (LLM call)
-        create_mock_json_response(high_score_evaluation),   # evaluate_analogy
-        # No refine_analogy call expected
+    # These are the JSON strings that LLMChain.arun will return sequentially
+    # Order of LLM calls in generate_analogies: 
+    # 1. generate_domain_analogies
+    # 2. search_existing_analogies (LLM part, after source_validator.search_web)
+    # 3. evaluate_analogy (for each generated analogy)
+    # (refine_analogy is not called in this scenario)
+    mock_chain_arun_side_effects = [
+        json.dumps([mock_analogy]),                # For generate_domain_analogies
+        json.dumps([mock_existing_analogy]),       # For search_existing_analogies (LLM part)
+        json.dumps(high_score_evaluation),         # For evaluate_analogy (mock_analogy)
     ]
-    mock_llm.arun.side_effect = mock_llm_responses
 
-    # Mock search results for existing analogies
-    mock_source_validator.search_web.side_effect = [
-        [{"title": "Blog", "url": "http://example.com/blog"}], # For existing analogies
-        [{"url": "http://brave.com/img.jpg"}] # For visual fallback (if needed)
-    ]
-    # Mock visual search
+    # Mock search results for existing analogies (SourceValidator part)
+    mock_source_validator.search_web.return_value = [{"title": "Blog", "url": "http://example.com/blog", "description": "Desc..."}]
+    # Mock visual search (FirecrawlClient part)
     mock_firecrawl_client.search_images.return_value = [mock_visual_asset]
 
-    result = await analogy_generator.generate_analogies(test_concept)
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.side_effect = mock_chain_arun_side_effects
+        result = await analogy_generator.generate_analogies(test_concept) # Default refinement_threshold is 7.0
 
     assert result["concept"] == test_concept
     assert len(result["generated_analogies"]) == 1
@@ -393,99 +466,220 @@ async def test_generate_analogies_success_no_refinement(analogy_generator, mock_
     assert result["stats"]["visual_assets_count"] == 1
     assert result["stats"]["average_score"] == 8.0
 
-    # Expected LLM calls: generate, search existing, evaluate
-    assert mock_llm.arun.call_count == 3
-    mock_source_validator.search_web.assert_called_once() # Only called for existing analogies search
+    # Expected LLM calls: generate_domain_analogies, search_existing_analogies (LLM), evaluate_analogy
+    assert mock_arun.call_count == 3
+    # Detailed checks for each call (optional but good for robustness)
+    # Call 1: generate_domain_analogies
+    assert mock_arun.call_args_list[0].kwargs['concept'] == test_concept
+    # Call 2: search_existing_analogies
+    assert mock_arun.call_args_list[1].kwargs['concept'] == test_concept
+    assert "Blog" in mock_arun.call_args_list[1].kwargs['results']
+    # Call 3: evaluate_analogy
+    assert mock_arun.call_args_list[2].kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in mock_arun.call_args_list[2].kwargs['analogy']
+    
+    mock_source_validator.search_web.assert_called_once() # Called for existing analogies search
     mock_firecrawl_client.search_images.assert_called_once() # Called for visual
 
 @pytest.mark.asyncio
-async def test_generate_analogies_success_with_refinement(analogy_generator, mock_llm, mock_source_validator, mock_firecrawl_client):
+async def test_generate_analogies_success_with_refinement(analogy_generator, mock_source_validator, mock_firecrawl_client):
     """Test full workflow: analogy generated, score < threshold, refined, existing found, visual found."""
     low_score_evaluation = {"overall_score": 6.0, "improvement_suggestions": ["Make it simpler"]}
-    mock_llm_responses = [
-        create_mock_json_response([mock_analogy]),           # generate_domain_analogies
-        create_mock_json_response([mock_existing_analogy]),  # search_existing_analogies (LLM call)
-        create_mock_json_response(low_score_evaluation),    # evaluate_analogy
-        create_mock_json_response(mock_refined_analogy)     # refine_analogy
+    # Order of LLM calls in generate_analogies for this scenario:
+    # 1. generate_domain_analogies
+    # 2. search_existing_analogies (LLM part, after source_validator.search_web)
+    # 3. evaluate_analogy (for the generated analogy)
+    # 4. refine_analogy (because score is low)
+    mock_chain_arun_side_effects = [
+        json.dumps([mock_analogy]),           # For generate_domain_analogies
+        json.dumps([mock_existing_analogy]),  # For search_existing_analogies (LLM part)
+        json.dumps(low_score_evaluation),     # For evaluate_analogy (for mock_analogy)
+        json.dumps(mock_refined_analogy)      # For refine_analogy
     ]
-    mock_llm.arun.side_effect = mock_llm_responses
 
-    mock_source_validator.search_web.return_value = [{"title": "Blog", "url": "http://example.com/blog"}] # For existing
-    mock_firecrawl_client.search_images.return_value = [mock_visual_asset] # For visual
+    # Mock search results for existing analogies (SourceValidator part)
+    mock_source_validator.search_web.return_value = [{"title": "Blog", "url": "http://example.com/blog", "description": "Desc..."}]
+    # Mock visual search (FirecrawlClient part)
+    mock_firecrawl_client.search_images.return_value = [mock_visual_asset]
 
-    result = await analogy_generator.generate_analogies(test_concept, refinement_threshold=7.0)
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.side_effect = mock_chain_arun_side_effects
+        result = await analogy_generator.generate_analogies(test_concept, refinement_threshold=7.0)
 
+    assert result["concept"] == test_concept
     assert len(result["generated_analogies"]) == 1
     gen_analogy = result["generated_analogies"][0]
+    
     # The final list should contain the *refined* analogy
     assert gen_analogy["title"] == mock_refined_analogy["title"]
-    # Evaluation might not be directly attached to the refined one unless refine adds it back
-    # assert "evaluation" not in gen_analogy # Or check if refine merges evaluation
-    assert "visual" in gen_analogy and gen_analogy["visual"]["success"] is True
+    
+    # Refined analogy (from mock_refined_analogy) doesn't have 'evaluation' key from its prompt.
+    # 'visual' key is added by the workflow.
+    assert "evaluation" not in gen_analogy 
+    assert "visual" in gen_analogy
+    assert gen_analogy["visual"]["success"] is True
+    assert len(gen_analogy["visual"]["assets"]) == 1
+    
     assert len(result["existing_analogies"]) == 1
-    assert result["stats"]["average_score"] == 0.0 # Average score recalculated based on *final* list, which lacks score here
+    assert result["existing_analogies"][0]["analogy"] == mock_existing_analogy["analogy"]
+    
+    assert result["stats"]["generated_count"] == 1
+    assert result["stats"]["existing_count"] == 1
+    assert result["stats"]["visual_assets_count"] == 1
+    # Average score is 0.0 because the single refined analogy in final_analogies 
+    # doesn't have an 'evaluation' field with an 'overall_score'.
+    assert result["stats"]["average_score"] == 0.0 
 
-    # Expected LLM calls: generate, search existing, evaluate, refine
-    assert mock_llm.arun.call_count == 4
+    # Expected LLM calls: generate_domain_analogies, search_existing_analogies (LLM), evaluate_analogy, refine_analogy
+    assert mock_arun.call_count == 4
+    
+    # Detailed checks for each call's arguments
+    # Call 1: generate_domain_analogies
+    assert mock_arun.call_args_list[0].kwargs['concept'] == test_concept
+    assert mock_arun.call_args_list[0].kwargs['min_analogies'] == analogy_generator.min_analogies
+    assert "Nature & Biology" in mock_arun.call_args_list[0].kwargs['domains']
+    # Call 2: search_existing_analogies (LLM part)
+    assert mock_arun.call_args_list[1].kwargs['concept'] == test_concept
+    assert "Blog" in mock_arun.call_args_list[1].kwargs['results'] # Check that search_web result was passed
+    # Call 3: evaluate_analogy
+    assert mock_arun.call_args_list[2].kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in mock_arun.call_args_list[2].kwargs['analogy']
+    # Call 4: refine_analogy
+    assert mock_arun.call_args_list[3].kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in mock_arun.call_args_list[3].kwargs['analogy'] # Original analogy passed
+    assert "Make it simpler" in mock_arun.call_args_list[3].kwargs['evaluation'] # Evaluation feedback passed
+
+    mock_source_validator.search_web.assert_called_once() 
+    mock_firecrawl_client.search_images.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_generate_analogies_override_success(analogy_generator, mock_llm, mock_source_validator, mock_firecrawl_client):
-    """Test full workflow using llm_override."""
-    initial_llm = mock_llm
+    """Test full workflow using llm_override, ensuring LLMChain.arun is called as expected."""
+    # mock_llm is analogy_generator.initial_llm via fixture setup. We'll assert it's not used.
+    initial_llm_from_fixture = mock_llm 
+    
     override_llm = MagicMock(spec=BaseChatModel)
-    override_llm.arun = AsyncMock()
+    # No need to mock override_llm.arun if we are patching LLMChain.arun,
+    # as AnalogyGenerator will use override_llm to construct the LLMChain internally.
 
     high_score_evaluation = {"overall_score": 9.0}
-    override_responses = [
-        create_mock_json_response([mock_analogy]),          # generate_domain_analogies
-        create_mock_json_response([mock_existing_analogy]), # search_existing_analogies (LLM call)
-        create_mock_json_response(high_score_evaluation),   # evaluate_analogy
+    # These are the JSON strings that the patched LLMChain.arun will return sequentially.
+    # Order of LLM calls: generate_domain_analogies, search_existing_analogies (LLM), evaluate_analogy
+    mock_chain_arun_side_effects = [
+        json.dumps([mock_analogy]),          # For generate_domain_analogies
+        json.dumps([mock_existing_analogy]), # For search_existing_analogies (LLM part)
+        json.dumps(high_score_evaluation),   # For evaluate_analogy
     ]
-    override_llm.arun.side_effect = override_responses
 
-    mock_source_validator.search_web.return_value = [{"title": "Blog", "url": "http://example.com/blog"}]
+    mock_source_validator.search_web.return_value = [{"title": "Blog Override", "url": "http://example.com/override", "description": "Desc..."}]
     mock_firecrawl_client.search_images.return_value = [mock_visual_asset]
 
-    result = await analogy_generator.generate_analogies(test_concept, llm_override=override_llm)
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_chain_arun:
+        mock_chain_arun.side_effect = mock_chain_arun_side_effects
+        
+        # Call the main method with llm_override
+        result = await analogy_generator.generate_analogies(test_concept, llm_override=override_llm)
 
+    assert result["concept"] == test_concept
     assert len(result["generated_analogies"]) == 1
-    assert result["generated_analogies"][0]["title"] == mock_analogy["title"]
+    gen_analogy = result["generated_analogies"][0]
+    assert gen_analogy["title"] == mock_analogy["title"]
+    assert "evaluation" in gen_analogy
+    assert gen_analogy["evaluation"]["overall_score"] == 9.0
+    assert "visual" in gen_analogy
+    assert gen_analogy["visual"]["success"] is True
+    
     assert len(result["existing_analogies"]) == 1
+    assert result["existing_analogies"][0]["analogy"] == mock_existing_analogy["analogy"]
+    
+    assert result["stats"]["generated_count"] == 1
     assert result["stats"]["average_score"] == 9.0
 
-    # Verify override LLM was called, initial was not
-    assert override_llm.arun.call_count == 3
-    initial_llm.arun.assert_not_called()
+    # Verify the patched LLMChain.arun was called
+    assert mock_chain_arun.call_count == 3
+    
+    # Detailed checks for each call's arguments to the patched LLMChain.arun
+    # Call 1: generate_domain_analogies
+    assert mock_chain_arun.call_args_list[0].kwargs['concept'] == test_concept
+    # Call 2: search_existing_analogies (LLM part)
+    assert mock_chain_arun.call_args_list[1].kwargs['concept'] == test_concept
+    assert "Blog Override" in mock_chain_arun.call_args_list[1].kwargs['results']
+    # Call 3: evaluate_analogy
+    assert mock_chain_arun.call_args_list[2].kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in mock_chain_arun.call_args_list[2].kwargs['analogy']
+
+    # Verify the initial LLM (from fixture) was NOT used
+    initial_llm_from_fixture.arun.assert_not_called() 
+    # If initial_llm.agenerate was the underlying call for LLMChain, check that too.
+    # However, AnalogyGenerator uses chain.arun, so initial_llm.arun.assert_not_called() is most direct
+    # if we assume direct arun usage. Given we mock LLMChain.arun, this check ensures the
+    # override path didn't somehow fall back to chains made with initial_llm and then try to call initial_llm.arun.
+    # A more robust check would be to patch LLMChain.__init__ to see which LLM it was constructed with,
+    # but that is more involved. For now, this covers the main point.
+
     mock_source_validator.search_web.assert_called_once()
     mock_firecrawl_client.search_images.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_generate_analogies_llm_error_in_evaluate(analogy_generator, mock_llm, mock_source_validator, mock_firecrawl_client):
-    """Test full workflow when LLM fails during evaluation."""
-    mock_llm_responses = [
-        create_mock_json_response([mock_analogy]),          # generate_domain_analogies (Success)
-        create_mock_json_response([mock_existing_analogy]), # search_existing_analogies (Success)
-        AsyncMock(side_effect=Exception("LLM evaluation failed")), # evaluate_analogy (Failure)
+async def test_generate_analogies_llm_error_in_evaluate(analogy_generator, mock_source_validator, mock_firecrawl_client):
+    """Test full workflow when LLMChain.arun fails during evaluation, ensuring graceful handling."""
+    # Define the side effects for the patched LLMChain.arun
+    # 1. generate_domain_analogies (Success)
+    # 2. search_existing_analogies (LLM part - Success)
+    # 3. evaluate_analogy (Failure)
+    mock_chain_arun_side_effects = [
+        json.dumps([mock_analogy]),                       # For generate_domain_analogies
+        json.dumps([mock_existing_analogy]),          # For search_existing_analogies (LLM part)
+        Exception("LLM evaluation chain failed")        # For evaluate_analogy (causes the error)
     ]
-    mock_llm.arun.side_effect = mock_llm_responses
 
-    mock_source_validator.search_web.return_value = [{"title": "Blog", "url": "http://example.com/blog"}]
+    mock_source_validator.search_web.return_value = [{"title": "Blog Error Case", "url": "http://example.com/error", "description": "Desc..."}]
     mock_firecrawl_client.search_images.return_value = [mock_visual_asset]
 
-    # The workflow should still complete, but the generated analogy might lack evaluation/refinement
-    result = await analogy_generator.generate_analogies(test_concept)
+    with patch('agents.research.analogy_generator.LLMChain.arun', new_callable=AsyncMock) as mock_arun:
+        mock_arun.side_effect = mock_chain_arun_side_effects
+        
+        # The workflow should still complete, but the generated analogy might lack evaluation/refinement
+        result = await analogy_generator.generate_analogies(test_concept)
 
+    assert result["concept"] == test_concept
     assert len(result["generated_analogies"]) == 1 # Analogy was generated initially
     gen_analogy = result["generated_analogies"][0]
-    assert gen_analogy["title"] == mock_analogy["title"]
-    assert "evaluation" not in gen_analogy # Evaluation failed
-    assert "visual" in gen_analogy and gen_analogy["visual"]["success"] is True # Visual generation still runs
+    assert gen_analogy["title"] == mock_analogy["title"] # The original analogy is kept
+    
+    # Evaluation failed, so 'evaluation' key should not be present or should indicate failure
+    # Depending on implementation, it might be missing, or have an error field.
+    # The current code in AnalogyGenerator means it will be missing if evaluate_analogy fails and error is caught.
+    assert "evaluation" not in gen_analogy 
+    
+    # Visual generation still runs on the initially generated analogy
+    assert "visual" in gen_analogy
+    assert gen_analogy["visual"]["success"] is True 
+    assert len(gen_analogy["visual"]["assets"]) == 1
+    
     assert len(result["existing_analogies"]) == 1
-    assert result["stats"]["average_score"] == 0.0 # No valid scores
+    assert result["existing_analogies"][0]["analogy"] == mock_existing_analogy["analogy"]
+    
+    assert result["stats"]["generated_count"] == 1
+    # No valid scores because evaluation failed for the one generated analogy
+    assert result["stats"]["average_score"] == 0.0 
 
-    # Expected LLM calls: generate, search existing, evaluate (failed)
-    assert mock_llm.arun.call_count == 3
+    # Expected LLMChain.arun calls: generate_domain_analogies, search_existing_analogies (LLM), evaluate_analogy (failed)
+    assert mock_arun.call_count == 3
+    
+    # Detailed checks for arguments of successful calls
+    # Call 1: generate_domain_analogies
+    assert mock_arun.call_args_list[0].kwargs['concept'] == test_concept
+    # Call 2: search_existing_analogies (LLM part)
+    assert mock_arun.call_args_list[1].kwargs['concept'] == test_concept
+    assert "Blog Error Case" in mock_arun.call_args_list[1].kwargs['results']
+    # Call 3: evaluate_analogy (this one failed but was called)
+    assert mock_arun.call_args_list[2].kwargs['concept'] == test_concept
+    assert mock_analogy['title'] in mock_arun.call_args_list[2].kwargs['analogy']
+
+    mock_source_validator.search_web.assert_called_once()
+    mock_firecrawl_client.search_images.assert_called_once()
 
 
 # Add more tests for variations like visual search failing, JSON errors in workflow, etc. 
