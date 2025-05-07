@@ -7,7 +7,7 @@ import logging
 from collections import deque
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from agents.researcher_agent import ResearcherAgent
+from agents.researcher_agent import ResearcherAgent, TopicAnalysisError
 import webbrowser # Added for opening browser
 
 # Configure logging
@@ -373,11 +373,32 @@ async def main():
         result = await agent.process_blog(file_path)
         end_process_time = time.time()
         
-        logger.info("--- Processing Result ---")
-        # Print result only if it's not None
+        # Check the result dictionary
         if result:
-            print(json.dumps(result, indent=2))
+            print("\n--- Processing Result ---")
+            research_data = result.get('research_data', {})
+            errors = result.get('errors', {})
+            
+            if not errors:
+                print("Processing completed successfully!")
+                # Optionally print full research data:
+                # print(json.dumps(research_data, indent=2))
+            else:
+                print(f"Processing finished with {len(errors)} error(s).")
+                print("Successful components:", list(research_data.keys()))
+                print("Errors:")
+                for component, error_msg in errors.items():
+                    print(f"  - {component}: {error_msg}")
+                # Optionally print partial data:
+                # if research_data:
+                #     print("\nPartial Research Data:")
+                #     print(json.dumps(research_data, indent=2))
+                    
+            # You might still want to save partial results or errors to DB/file here
+            
         else:
+            # This case should ideally not happen anymore if process_blog always returns a dict
+            print("\n--- Processing Result ---")
             print("Processing finished, but no result dictionary was returned (check logs for errors).")
             
         logger.info(f"Total processing time: {end_process_time - start_process_time:.2f} seconds")
@@ -401,7 +422,7 @@ async def main():
         elif result:
             logger.warning("Processing completed but no report URL found or status not 'success'.")
             
-    except Exception as e:
+    except TopicAnalysisError as e:
         logger.error(f"Error processing blog: {e}")
         # --- ADDED FALLBACK LOGGING ---
         # Check if the error happened *during* processing and if agent has partial data

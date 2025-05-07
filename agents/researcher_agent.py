@@ -27,6 +27,29 @@ import requests
 import sys
 import httpx # Added for async requests
 
+# Langchain imports
+from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
+from openai import RateLimitError as OpenAIRateLimitError, AuthenticationError as OpenAIAuthenticationError
+try:
+    from langchain_groq import ChatGroq
+    GROQ_AVAILABLE = True
+except ImportError:
+    # Create a mock ChatGroq class if the import fails
+    class ChatGroq:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("langchain_groq is not installed. Install it with: pip install langchain-groq")
+    GROQ_AVAILABLE = False
+try:
+    from langchain_community.chat_models import ChatOpenRouter
+    OPENROUTER_AVAILABLE = True
+except ImportError:
+    # Create a mock ChatOpenRouter class if the import fails
+    class ChatOpenRouter:
+         def __init__(self, *args, **kwargs):
+            raise ImportError("langchain-community and openrouter are not installed. Install with: pip install langchain-community openrouter-python")
+    OPENROUTER_AVAILABLE = False
+
 # Import utility modules
 from agents.utilities.db import MongoDBClient
 from agents.utilities.yaml_guard import create_tracker_yaml
@@ -86,7 +109,9 @@ class ResearcherAgent:
         opik_server: Optional[str] = None,
         firecrawl_server: Optional[str] = None,
         openai_api_key: Optional[str] = None,
-        groq_api_key: Optional[str] = None
+        groq_api_key: Optional[str] = None,
+        openrouter_api_key: Optional[str] = None,
+        llm_preference: Optional[List[str]] = None # Added LLM preference order
     ):
         """
         Initialize the Researcher Agent.
@@ -98,18 +123,24 @@ class ResearcherAgent:
             firecrawl_server: Firecrawl MCP server address
             openai_api_key: OpenAI API key
             groq_api_key: Groq API key
+            openrouter_api_key: OpenRouter API key
+            llm_preference: Ordered list of preferred LLM providers (e.g., ['openai', 'groq', 'openrouter'])
         """
         # Store DB client
         self.db_client = db_client
         
-        # Store API keys
-        self.brave_api_key = brave_api_key
-        self.openai_api_key = openai_api_key
-        self.groq_api_key = groq_api_key
+        # Store API keys from args or environment variables
+        self.brave_api_key = brave_api_key or os.environ.get("BRAVE_API_KEY")
+        self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
+        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY")
+        self.openrouter_api_key = openrouter_api_key or os.environ.get("OPENROUTER_API_KEY")
         
         # Store server addresses
         self.opik_server = opik_server
         self.firecrawl_server = firecrawl_server
+        
+        # Set LLM provider preference order
+        self.llm_preference = llm_preference or ["openai", "groq", "openrouter"]
         
         # Initialize readiness thresholds
         self.readiness_thresholds = {
@@ -220,6 +251,31 @@ class ResearcherAgent:
             'F': 0
         }
         
+        # Initialize all available LLM instances
+        self.openai_llm = self._initialize_openai_llm()
+        self.groq_llm = self._initialize_groq_llm()
+        self.openrouter_llm = self._initialize_openrouter_llm()
+        
+        # Store available LLM instances in a dictionary for easier access
+        self.available_llms = {
+            "openai": self.openai_llm,
+            "groq": self.groq_llm,
+            "openrouter": self.openrouter_llm
+        }
+        
+        # Set the primary LLM based on preference and availability
+        self.llm = None
+        self.primary_llm_provider = None
+        for provider in self.llm_preference:
+            if self.available_llms.get(provider):
+                self.llm = self.available_llms[provider]
+                self.primary_llm_provider = provider
+                logger.info(f"Primary LLM set to: {provider}")
+                break
+                
+        if not self.llm:
+             raise TopicAnalysisError("Could not initialize any LLM. Please check API keys and provider preferences.")
+        
         # Log agent initialization
         logger.info("Initializing Researcher Agent with components")
         
@@ -249,7 +305,7 @@ class ResearcherAgent:
         try:
             # Try to import and initialize IndustryAnalyzer
             from agents.research import IndustryAnalyzer
-            self.industry_analyzer = IndustryAnalyzer()
+            self.industry_analyzer = IndustryAnalyzer(llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized IndustryAnalyzer")
         except (ImportError, Exception) as e:
             logger.warning(f"Failed to initialize IndustryAnalyzer: {e}")
@@ -258,7 +314,7 @@ class ResearcherAgent:
         try:
             # Try to import and initialize SolutionAnalyzer
             from agents.research import SolutionAnalyzer
-            self.solution_analyzer = SolutionAnalyzer()
+            self.solution_analyzer = SolutionAnalyzer(llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized SolutionAnalyzer")
         except (ImportError, Exception) as e:
             logger.warning(f"Failed to initialize SolutionAnalyzer: {e}")
@@ -267,7 +323,7 @@ class ResearcherAgent:
         try:
             # Try to import and initialize ParadigmAnalyzer
             from agents.research import ParadigmAnalyzer
-            self.paradigm_analyzer = ParadigmAnalyzer()
+            self.paradigm_analyzer = ParadigmAnalyzer(llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized ParadigmAnalyzer")
         except (ImportError, Exception) as e:
             logger.warning(f"Failed to initialize ParadigmAnalyzer: {e}")
@@ -276,7 +332,7 @@ class ResearcherAgent:
         try:
             # Try to import and initialize AudienceAnalyzer
             from agents.research import AudienceAnalyzer
-            self.audience_analyzer = AudienceAnalyzer()
+            self.audience_analyzer = AudienceAnalyzer(llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized AudienceAnalyzer")
         except (ImportError, Exception) as e:
             logger.warning(f"Failed to initialize AudienceAnalyzer: {e}")
@@ -285,7 +341,11 @@ class ResearcherAgent:
         try:
             # Try to import and initialize AnalogyGenerator
             from agents.research import AnalogyGenerator
-            self.analogy_generator = AnalogyGenerator()
+            self.analogy_generator = AnalogyGenerator(
+                llm=self.llm,
+                source_validator=self.source_validator,
+                firecrawl_client=self.firecrawl_client
+            )
             logger.info("Initialized AnalogyGenerator")
         except (ImportError, Exception) as e:
             logger.warning(f"Failed to initialize AnalogyGenerator: {e}")
@@ -298,9 +358,10 @@ class ResearcherAgent:
             # Check if we have the required dependencies
             if self.firecrawl_client:
                 self.visual_asset_collector = VisualAssetCollector(
-                    openai_api_key=self.openai_api_key, # Pass the OpenAI key
+                    llm=self.llm, # Pass primary LLM
+                    openai_api_key=self.openai_api_key,
                     firecrawl_client=self.firecrawl_client,
-                    source_validator=self.source_validator # Also pass validator if needed by VAC
+                    source_validator=self.source_validator 
                 )
                 logger.info("Initialized VisualAssetCollector")
             else:
@@ -316,6 +377,7 @@ class ResearcherAgent:
             "brave_api_key": self.brave_api_key is not None,
             "openai_api_key": self.openai_api_key is not None,
             "groq_api_key": self.groq_api_key is not None,
+            "openrouter_api_key": self.openrouter_api_key is not None, # Added OpenRouter key check
             "firecrawl_server": self.firecrawl_server is not None,
             "opik_server": self.opik_server is not None,
             "components": [
@@ -329,6 +391,62 @@ class ResearcherAgent:
         })
         
         logger.info("Researcher Agent initialization complete")
+    
+    def _initialize_openai_llm(self) -> Optional[BaseChatModel]:
+        """Initializes OpenAI LLM if key is available."""
+        if self.openai_api_key:
+            try:
+                logger.info("Initializing LLM with OpenAI (gpt-4o)")
+                return ChatOpenAI(
+                    model_name="gpt-4o", # Use latest model
+                    temperature=0.5,
+                    openai_api_key=self.openai_api_key
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI LLM: {e}")
+        return None
+
+    def _initialize_groq_llm(self) -> Optional[BaseChatModel]:
+        """Initializes Groq LLM if key and library are available."""
+        if self.groq_api_key and GROQ_AVAILABLE:
+            try:
+                logger.info("Initializing LLM with Groq (llama3-70b-8192)")
+                return ChatGroq(
+                    model_name="llama3-70b-8192", 
+                    temperature=0.5, 
+                    groq_api_key=self.groq_api_key
+                )
+            except ImportError:
+                 logger.warning("Could not import langchain_groq. Skipping Groq LLM.")
+            except Exception as e:
+                 logger.error(f"Failed to initialize Groq LLM: {e}")
+        return None
+
+    def _initialize_openrouter_llm(self) -> Optional[BaseChatModel]:
+        """Initializes OpenRouter LLM if key and library are available."""
+        if self.openrouter_api_key and OPENROUTER_AVAILABLE:
+            try:
+                logger.info("Initializing LLM with OpenRouter (openai/gpt-4o)")
+                return ChatOpenRouter(
+                    model_name="openai/gpt-4o", # Specify model
+                    openrouter_api_key=self.openrouter_api_key
+                )
+            except ImportError:
+                 logger.warning("Could not import langchain_community. Skipping OpenRouter LLM.")
+            except Exception as e:
+                 logger.error(f"Failed to initialize OpenRouter LLM: {e}")
+        return None
+
+    def _get_fallback_order(self, start_provider: str) -> List[str]:
+        """Gets the LLM provider fallback order starting from a given provider."""
+        try:
+            start_index = self.llm_preference.index(start_provider)
+            # Return the order starting from the current provider
+            return self.llm_preference[start_index:] + self.llm_preference[:start_index]
+        except ValueError:
+            # If start_provider is not in preference, return the default order
+            logger.warning(f"Provider '{start_provider}' not in preference list. Using default order.")
+            return self.llm_preference
     
     def process_markdown_file(self, file_path: str) -> Dict[str, Any]:
         """
@@ -504,366 +622,244 @@ class ResearcherAgent:
             logger.error(f"Error in citation search: {e}")
             raise CitationError(f"Failed to get citations: {e}")
     
-    async def gather_research(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_with_fallback(
+        self, 
+        task_func, 
+        current_provider_name: str, 
+        *args, 
+        **kwargs
+    ) -> Tuple[Optional[Any], Optional[str], Optional[BaseChatModel]]:
         """
-        Gather research data using a sequential orchestration approach (asynchronously).
+        Executes a task function with LLM fallback logic, returning the result 
+        and the LLM provider/instance that succeeded.
         
         Args:
-            metadata: Metadata extracted from the blog
+            task_func: The async function to execute (e.g., component.analyze_x).
+            current_provider_name: The name of the currently preferred LLM provider.
+            *args: Positional arguments for the task_func.
+            **kwargs: Keyword arguments for the task_func.
             
         Returns:
-            Dictionary with research data
+            A tuple containing:
+            - result: The result from the task_func if successful, else None.
+            - succeeded_provider_name: The name of the provider that succeeded, else None.
+            - succeeded_llm_instance: The LLM instance that succeeded, else None.
         """
-        # Initialize research data
-        research_data = {
-            'citations': [],
-            'system_affected': {'name': metadata.get('main_topic')},  # Initialize with main_topic to pass test
-            'challenges': [],
-            'solution': {},
-            'paradigms': {},
-            'audience': {},
-            'analogies': {},
-            'visual_assets': {},
-        }
+        fallback_order = self._get_fallback_order(current_provider_name)
+        last_exception = None
         
-        # Initialize progress tracking
-        progress = {
-            'completion_percentage': 0,
-            'completed_components': [],
-            'pending_components': [
-                'citations', 'industry_analysis', 'solution_analysis',
-                'paradigm_analysis', 'audience_analysis', 'analogy_generation',
-                'visual_asset_collection'
-            ],
-            'errors': []
-        }
+        for provider_name in fallback_order:
+            llm_instance = self.available_llms.get(provider_name)
+            
+            if not llm_instance:
+                logger.debug(f"Skipping LLM provider '{provider_name}' as it's not available/initialized.")
+                continue
+                
+            try:
+                logger.info(f"Attempting task '{task_func.__name__}' with LLM provider: {provider_name}")
+                # Pass the current llm_instance via llm_override
+                kwargs['llm_override'] = llm_instance 
+                result = await task_func(*args, **kwargs)
+                logger.info(f"Task '{task_func.__name__}' succeeded with LLM provider: {provider_name}")
+                return result, provider_name, llm_instance # Return result and successful provider info
+
+            except (OpenAIRateLimitError, OpenAIAuthenticationError) as e: # Catch specific recoverable errors
+                logger.warning(f"LLM provider '{provider_name}' failed with recoverable error: {type(e).__name__}. Trying next provider.")
+                last_exception = e
+                # Optionally add a small delay before retrying with the next provider
+                await asyncio.sleep(1) 
+            except Exception as e:
+                # Catch other unexpected errors during the task execution
+                logger.error(f"Unexpected error during task '{task_func.__name__}' with provider '{provider_name}': {e}", exc_info=True)
+                last_exception = e
+                # Decide if we should break or try next provider for general errors
+                # For now, we continue to the next provider for any error during the task itself.
+                # If the LLM initialization failed, it would be caught earlier.
+
+        # If all providers failed
+        logger.error(f"Task '{task_func.__name__}' failed after trying all available LLM providers in order: {fallback_order}.")
+        if last_exception:
+             logger.error(f"Last error encountered: {type(last_exception).__name__}: {last_exception}")
+            # Instead of raising, return None to indicate failure
+            # raise last_exception 
         
-        # Log start of research orchestration
-        logger.info(f"Starting async research orchestration for topic: {metadata.get('main_topic')}")
-        self._log_to_opik("Async Research orchestration started", "async_research_start", {
-            "topic": metadata.get('main_topic')
+        return None, None, None # Indicate failure
+
+
+    async def gather_research(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Orchestrate the asynchronous gathering of all research components with persistent LLM fallback.
+        
+        Args:
+            metadata: Dictionary containing topic metadata.
+            
+        Returns:
+            Dictionary containing all gathered research data and errors.
+        """
+        start_time = datetime.now()
+        topic = metadata.get('main_topic', 'Unknown Topic')
+        logger.info(f"Starting async research orchestration for topic: {topic}")
+        
+        # Initialize current LLM state
+        current_llm_provider_name = self.primary_llm_provider
+        current_llm_instance = self.llm 
+        
+        # Dictionary to hold results from async tasks
+        results = {}
+        errors = {}
+        
+        # --- Define Async Tasks --- 
+        
+        # Citations Task (Doesn't use LLM, no fallback needed directly here)
+        async def citations_task():
+            task_name = "citations"
+            try:
+                # Note: The underlying source_validator.search_web might have its own retry/fallback logic if needed
+                citations_result = await self.search_citations(topic, count=10)
+                results[task_name] = citations_result
+                logger.info(f"Async Citations successful: Found {len(citations_result)} citations.")
+            except Exception as e:
+                logger.error(f"Error in async Citations task: {e}")
+                errors[task_name] = str(e)
+            finally:
+                 logger.info("Async Citations task finished.")
+                 self._log_to_opik("Citations task finished", "task_complete", {"task": task_name, "success": task_name in results, "error": errors.get(task_name)})
+
+        # Helper function to run an LLM task with fallback and update state
+        async def run_llm_task(task_name: str, task_func, *args):
+            nonlocal current_llm_provider_name, current_llm_instance # Allow modification of outer scope variables
+            
+            if not getattr(self, f"{task_name}_analyzer", True) and task_name != "analogy": # Check if component exists (except analogy)
+                 if task_name == "analogy" and not self.analogy_generator:
+                     logger.warning(f"Skipping {task_name} task (generator not initialized)")
+                     errors[task_name] = "Generator not initialized"
+                     return
+                 elif task_name != "analogy":
+                     logger.warning(f"Skipping {task_name} task (analyzer not initialized)")
+                     errors[task_name] = "Analyzer not initialized"
+                     return
+
+            task_result, succeeded_provider, succeeded_instance = await self._execute_with_fallback(
+                 task_func,
+                 current_llm_provider_name, # Pass current provider name
+                 *args # Pass positional arguments for the task
+                 # llm_override is handled inside _execute_with_fallback
+            )
+            
+            if succeeded_provider:
+                 results[task_name] = task_result
+                 # Update current LLM state IF it changed
+                 if succeeded_provider != current_llm_provider_name:
+                     logger.info(f"Switching active LLM provider from {current_llm_provider_name} to {succeeded_provider} for subsequent tasks.")
+                     current_llm_provider_name = succeeded_provider
+                     current_llm_instance = succeeded_instance
+                 # Log success count based on typical output structure
+                 count_info = ""
+                 if task_name == 'industry' and isinstance(task_result, dict):
+                     count_info = f"Found {len(task_result.get('challenges', []))} challenges."
+                 elif task_name == 'solution' and isinstance(task_result, dict):
+                     pro_count = len(task_result.get('pro_arguments', []))
+                     con_count = len(task_result.get('counter_arguments', []))
+                     count_info = f"Found {pro_count} pro / {con_count} con arguments."
+                 elif task_name == 'paradigm' and isinstance(task_result, dict):
+                     hist_count = len(task_result.get('historical_paradigms', []))
+                     fut_count = len(task_result.get('future_paradigms', []))
+                     count_info = f"Found {hist_count} historical / {fut_count} future paradigms."
+                 elif task_name == 'audience' and isinstance(task_result, dict):
+                     count_info = f"Found {len(task_result.get('audience_segments', []))} audience segments."
+                 elif task_name == 'analogy' and isinstance(task_result, dict):
+                     gen_count = len(task_result.get('generated_analogies', []))
+                     ex_count = len(task_result.get('existing_analogies', []))
+                     count_info = f"Found {gen_count} generated / {ex_count} existing analogies."
+                 logger.info(f"Async {task_name.capitalize()} Analysis successful. {count_info}")
+        else:
+                 # Task failed even with fallback
+                 error_msg = f"Task '{task_func.__name__}' failed after trying all providers."
+                 logger.error(error_msg)
+                 errors[task_name] = error_msg
+            
+            logger.info(f"Async {task_name.capitalize()} task finished.")
+            self._log_to_opik(f"{task_name.capitalize()} task finished", "task_complete", {"task": task_name, "success": task_name in results, "error": errors.get(task_name)})
+
+
+        # Visual Asset Task (Doesn't directly use LLM in the main call, but components might)
+        async def visual_asset_task():
+            task_name = "visuals"
+            if not self.visual_asset_collector:
+                logger.warning("Skipping visual asset collection (collector not initialized)")
+                errors[task_name] = "Collector not initialized"
+                return
+            try:
+                # Assume visual asset collector might use LLM internally via its components, 
+                # but the main call doesn't need the llm_override directly.
+                # If VAC needs direct LLM interaction with fallback, its methods would need adjustment.
+                visual_result = await self.visual_asset_collector.collect_visuals(
+                    topic=topic,
+                    solution_data=results.get('solution'), # Pass results from previous tasks
+                    paradigm_data=results.get('paradigm'),
+                    analogy_data=results.get('analogy') 
+                )
+                results[task_name] = visual_result
+                count = visual_result.get('stats', {}).get('total_collected', 0)
+                logger.info(f"Async Visual Asset Collection successful: Collected {count} visuals.")
+            except Exception as e:
+                logger.error(f"Error in async Visual Asset Collection: {e}", exc_info=True)
+                errors[task_name] = str(e)
+            finally:
+                logger.info("Async Visual Asset Collection task finished.")
+                self._log_to_opik("Visual Asset task finished", "task_complete", {"task": task_name, "success": task_name in results, "error": errors.get(task_name)})
+
+        # --- Define and Run Tasks Concurrently --- 
+        
+        # Define tasks using the helper
+        llm_tasks_to_run = [
+             ('industry', self.industry_analyzer.analyze_industry, topic),
+             ('solution', self.solution_analyzer.analyze_solution, metadata.get('proposed_solution', 'Proposed Solution')),
+             ('paradigm', self.paradigm_analyzer.analyze_paradigms, topic),
+             ('audience', self.audience_analyzer.analyze_audience, topic),
+             ('analogy', self.analogy_generator.generate_analogies, topic),
+        ]
+        
+        # Create coroutines for LLM tasks
+        llm_coroutines = [run_llm_task(*task_def) for task_def in llm_tasks_to_run if getattr(self, f"{task_def[0]}_analyzer", True) or task_def[0] == 'analogy']
+        
+        # Add non-LLM and visual tasks
+        other_tasks = [citations_task()]
+        if self.visual_asset_collector:
+             other_tasks.append(visual_asset_task())
+
+        # Combine all tasks
+        all_tasks = llm_coroutines + other_tasks
+             
+        await asyncio.gather(*all_tasks)
+        
+        # --- Finalize and Return --- 
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        completion_percentage = (len(results) / len(all_tasks)) * 100
+        
+        logger.info(
+            f"Async Research orchestration complete. Completion: {completion_percentage:.0f}%. "
+            f"Errors: {len(errors)}"
+        )
+        
+        self._log_to_opik("Research orchestration complete", "orchestration_complete", {
+            "duration_seconds": duration,
+            "completion_percentage": completion_percentage,
+            "successful_tasks": list(results.keys()),
+            "failed_tasks": list(errors.keys()),
+            "errors": errors
         })
         
-        # Define async tasks for each component
-        tasks = []
+        # Combine results and errors for the final output
+        final_result = {
+            "research_data": results,
+            "errors": errors,
+            "metadata": metadata # Include original metadata
+        }
         
-        # --- Enhanced Logging for Tasks --- 
-
-        # Task 1: Citations (already async)
-        async def citations_task():
-            citations_result = None
-            task_name = "Citations"
-            try:
-                if self.brave_api_key:
-                    # Use the first section header as a query
-                    first_section = metadata.get('first_section_content', metadata.get('main_topic', ''))
-                    query = f"{metadata.get('main_topic', '')} {first_section[:100]}" # Limit query length
-                    citations_result = await self.search_citations(query, count=10)
-                    if citations_result:
-                        logger.info(f"Async {task_name} successful: Found {len(citations_result)} citations.") # Log Success
-                        self._log_to_opik(f"Async {task_name} complete", "citations_complete", {"count": len(citations_result)})
-                else:
-                    logger.warning("Brave API key not provided, skipping citation search.")
-                    if 'citations' in progress['pending_components']:
-                         progress['pending_components'].remove('citations')
-            except Exception as e:
-                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
-                progress['errors'].append({'component': 'citations', 'error': str(e)})
-                self._log_to_opik(f"Async {task_name} error", "citations_error", {"error": str(e)})
-                if 'citations' in progress['pending_components']:
-                    progress['pending_components'].remove('citations')
-            finally:
-                logger.info(f"Async {task_name} task finished.") # Log Completion
-                research_data['citations'] = citations_result if citations_result else []
-                if citations_result is not None and 'citations' in progress['pending_components']:
-                    progress['completed_components'].append('citations')
-                    progress['pending_components'].remove('citations')
-                elif citations_result is None and 'citations' not in progress['errors'] and 'citations' in progress['pending_components']:
-                     progress['pending_components'].remove('citations') # Remove if skipped
-
-        if self.brave_api_key:
-            tasks.append(citations_task())
-        else:
-             if 'citations' in progress['pending_components']:
-                 progress['pending_components'].remove('citations')
-
-        # Task 2: Industry Analysis (already async)
-        async def industry_task():
-            industry_result = None
-            task_name = "Industry Analysis"
-            try:
-                if hasattr(self, 'industry_analyzer') and self.industry_analyzer:
-                    industry_result = await self.industry_analyzer.analyze_industry(metadata.get('main_topic', ''))
-                    if industry_result:
-                        challenges_count = len(industry_result.get('challenges', []))
-                        logger.info(f"Async {task_name} successful: Found {challenges_count} challenges.") # Log Success
-                        self._log_to_opik(f"Async {task_name} complete", "industry_analysis_complete", {"challenges_count": challenges_count})
-                else:
-                    logger.warning("Industry analyzer not available, skipping")
-                    if 'industry_analysis' in progress['pending_components']:
-                         progress['pending_components'].remove('industry_analysis')
-            except Exception as e:
-                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
-                progress['errors'].append({'component': 'industry_analysis', 'error': str(e)})
-                self._log_to_opik(f"Async {task_name} error", "industry_analysis_error", {"error": str(e)})
-                if 'industry_analysis' in progress['pending_components']:
-                    progress['pending_components'].remove('industry_analysis')
-            finally:
-                logger.info(f"Async {task_name} task finished.") # Log Completion
-                research_data['industry_analysis'] = industry_result
-                if industry_result and 'industry_analysis' in progress['pending_components']:
-                    progress['completed_components'].append('industry_analysis')
-                    progress['pending_components'].remove('industry_analysis')
-                elif not industry_result and 'industry_analysis' not in progress['errors'] and 'industry_analysis' in progress['pending_components']:
-                    progress['pending_components'].remove('industry_analysis')
-
-        if hasattr(self, 'industry_analyzer') and self.industry_analyzer:
-            tasks.append(industry_task())
-        else:
-            if 'industry_analysis' in progress['pending_components']:
-                 progress['pending_components'].remove('industry_analysis')
-
-        # Task 3: Solution Analysis (already async)
-        async def solution_task():
-            solution_result = None
-            task_name = "Solution Analysis"
-            try:
-                if hasattr(self, 'solution_analyzer') and self.solution_analyzer:
-                    # Wait for industry analysis to potentially complete first
-                    await asyncio.sleep(0.1)
-                    challenges = research_data.get('industry_analysis', {}).get('challenges', [])
-                    solution_result = await self.solution_analyzer.analyze_solution(
-                        metadata.get('main_topic', ''),
-                        metadata.get('proposed_solution', 'Proposed Solution'), # Use metadata if available
-                        challenges
-                    )
-                    if solution_result:
-                        pro_args = len(solution_result.get('pro_arguments', []))
-                        con_args = len(solution_result.get('counter_arguments', []))
-                        logger.info(f"Async {task_name} successful: Found {pro_args} pro / {con_args} con arguments.") # Log Success
-                        self._log_to_opik(f"Async {task_name} complete", "solution_analysis_complete", {"pro_args": pro_args, "con_args": con_args})
-                else:
-                    logger.warning("Solution analyzer not available, skipping")
-                    if 'solution_analysis' in progress['pending_components']:
-                         progress['pending_components'].remove('solution_analysis')
-            except Exception as e:
-                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
-                progress['errors'].append({'component': 'solution_analysis', 'error': str(e)})
-                self._log_to_opik(f"Async {task_name} error", "solution_analysis_error", {"error": str(e)})
-                if 'solution_analysis' in progress['pending_components']:
-                    progress['pending_components'].remove('solution_analysis')
-            finally:
-                logger.info(f"Async {task_name} task finished.") # Log Completion
-                research_data['solution_analysis'] = solution_result
-                if solution_result and 'solution_analysis' in progress['pending_components']:
-                    progress['completed_components'].append('solution_analysis')
-                    progress['pending_components'].remove('solution_analysis')
-                elif not solution_result and 'solution_analysis' not in progress['errors'] and 'solution_analysis' in progress['pending_components']:
-                     progress['pending_components'].remove('solution_analysis')
-
-        if hasattr(self, 'solution_analyzer') and self.solution_analyzer:
-            tasks.append(solution_task())
-        else:
-            if 'solution_analysis' in progress['pending_components']:
-                 progress['pending_components'].remove('solution_analysis')
-
-        # Task 4: Paradigm Analysis (already async)
-        async def paradigm_task():
-            paradigm_result = None
-            task_name = "Paradigm Analysis"
-            try:
-                if hasattr(self, 'paradigm_analyzer') and self.paradigm_analyzer:
-                    paradigm_result = await self.paradigm_analyzer.analyze_paradigms(metadata.get('main_topic', ''))
-                    if paradigm_result:
-                        hist_p = len(paradigm_result.get('historical_paradigms', []))
-                        fut_p = len(paradigm_result.get('future_paradigms', []))
-                        logger.info(f"Async {task_name} successful: Found {hist_p} historical / {fut_p} future paradigms.") # Log Success
-                        self._log_to_opik(f"Async {task_name} complete", "paradigm_analysis_complete", {"historical_count": hist_p, "future_count": fut_p})
-                else:
-                    logger.warning("Paradigm analyzer not available, skipping")
-                    if 'paradigm_analysis' in progress['pending_components']:
-                         progress['pending_components'].remove('paradigm_analysis')
-            except Exception as e:
-                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
-                progress['errors'].append({'component': 'paradigm_analysis', 'error': str(e)})
-                self._log_to_opik(f"Async {task_name} error", "paradigm_analysis_error", {"error": str(e)})
-                if 'paradigm_analysis' in progress['pending_components']:
-                    progress['pending_components'].remove('paradigm_analysis')
-            finally:
-                logger.info(f"Async {task_name} task finished.") # Log Completion
-                research_data['paradigm_analysis'] = paradigm_result
-                if paradigm_result and 'paradigm_analysis' in progress['pending_components']:
-                    progress['completed_components'].append('paradigm_analysis')
-                    progress['pending_components'].remove('paradigm_analysis')
-                elif not paradigm_result and 'paradigm_analysis' not in progress['errors'] and 'paradigm_analysis' in progress['pending_components']:
-                     progress['pending_components'].remove('paradigm_analysis')
-
-        if hasattr(self, 'paradigm_analyzer') and self.paradigm_analyzer:
-            tasks.append(paradigm_task())
-        else:
-             if 'paradigm_analysis' in progress['pending_components']:
-                 progress['pending_components'].remove('paradigm_analysis')
-
-        # Task 5: Audience Analysis (already async)
-        async def audience_task():
-            audience_result = None
-            task_name = "Audience Analysis"
-            try:
-                if hasattr(self, 'audience_analyzer') and self.audience_analyzer:
-                    audience_result = await self.audience_analyzer.analyze_audience(metadata.get('main_topic', ''))
-                    if audience_result:
-                         segments_count = len(audience_result.get('segments', []))
-                         logger.info(f"Async {task_name} successful: Found {segments_count} audience segments.") # Log Success
-                         self._log_to_opik(f"Async {task_name} complete", "audience_analysis_complete", {"segments_count": segments_count})
-                else:
-                    logger.warning("Audience analyzer not available, skipping")
-                    if 'audience_analysis' in progress['pending_components']:
-                         progress['pending_components'].remove('audience_analysis')
-            except Exception as e:
-                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
-                progress['errors'].append({'component': 'audience_analysis', 'error': str(e)})
-                self._log_to_opik(f"Async {task_name} error", "audience_analysis_error", {"error": str(e)})
-                if 'audience_analysis' in progress['pending_components']:
-                     progress['pending_components'].remove('audience_analysis')
-            finally:
-                logger.info(f"Async {task_name} task finished.") # Log Completion
-                research_data['audience_analysis'] = audience_result
-                if audience_result and 'audience_analysis' in progress['pending_components']:
-                    progress['completed_components'].append('audience_analysis')
-                    progress['pending_components'].remove('audience_analysis')
-                elif not audience_result and 'audience_analysis' not in progress['errors'] and 'audience_analysis' in progress['pending_components']:
-                     progress['pending_components'].remove('audience_analysis')
-
-        if hasattr(self, 'audience_analyzer') and self.audience_analyzer:
-            tasks.append(audience_task())
-        else:
-            if 'audience_analysis' in progress['pending_components']:
-                 progress['pending_components'].remove('audience_analysis')
-
-        # Task 6: Analogy Generation (already async)
-        async def analogy_task():
-            analogy_result = None
-            task_name = "Analogy Generation"
-            try:
-                if hasattr(self, 'analogy_generator') and self.analogy_generator:
-                    await asyncio.sleep(0.2)
-                    # Assuming generate_analogies now takes only the concept
-                    # We might need to adjust based on AnalogyGenerator's final design
-                    # Let's assume it primarily needs the main topic for now.
-                    analogy_result = await self.analogy_generator.generate_analogies(metadata.get('main_topic', ''))
-
-                    if analogy_result:
-                        gen_count = len(analogy_result.get('generated_analogies', []))
-                        ex_count = len(analogy_result.get('existing_analogies', []))
-                        logger.info(f"Async {task_name} successful: Found {gen_count} generated / {ex_count} existing analogies.") # Log Success
-                        self._log_to_opik("Async Analogy generation complete", "analogy_generation_complete", {"generated": gen_count, "existing": ex_count})
-                else:
-                    logger.warning("Analogy generator not available, skipping")
-                    if 'analogy_generation' in progress['pending_components']:
-                        progress['pending_components'].remove('analogy_generation')
-            except Exception as e:
-                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
-                progress['errors'].append({'component': 'analogy_generation', 'error': str(e)})
-                self._log_to_opik("Async Analogy generation error", "analogy_generation_error", {"error": str(e)})
-                if 'analogy_generation' in progress['pending_components']:
-                    progress['pending_components'].remove('analogy_generation')
-            finally:
-                logger.info(f"Async {task_name} task finished.") # Log Completion
-                research_data['analogies'] = analogy_result
-                if analogy_result and 'analogy_generation' in progress['pending_components']:
-                    progress['completed_components'].append('analogy_generation')
-                    progress['pending_components'].remove('analogy_generation')
-                elif not analogy_result and 'analogy_generation' not in progress['errors'] and 'analogy_generation' in progress['pending_components']:
-                    progress['pending_components'].remove('analogy_generation')
-
-        if hasattr(self, 'analogy_generator') and self.analogy_generator:
-            tasks.append(analogy_task())
-        else:
-            if 'analogy_generation' in progress['pending_components']:
-                progress['pending_components'].remove('analogy_generation')
-
-        # Task 7: Visual Asset Collection (already async)
-        async def visual_asset_task():
-            visual_assets_result = None
-            task_name = "Visual Asset Collection"
-            try:
-                if hasattr(self, 'visual_asset_collector') and self.visual_asset_collector:
-                    await asyncio.sleep(0.3)
-                    visual_assets_result = await self.visual_asset_collector.analyze_visual_assets(
-                        metadata.get('main_topic', ''),
-                        research_data.get('solution_analysis', {}), # Pass analysis data
-                        research_data.get('paradigm_analysis', {}) # Pass analysis data
-                    )
-                    if visual_assets_result:
-                        total_visuals = visual_assets_result.get('stats', {}).get('total_visuals', 0)
-                        logger.info(f"Async {task_name} successful: Collected {total_visuals} visuals.") # Log Success
-                        self._log_to_opik("Async Visual asset collection complete", "visual_asset_collection_complete", {"count": total_visuals})
-                else:
-                    if 'visual_asset_collection' in progress['pending_components']:
-                        logger.warning("Visual asset collector not available, skipping")
-                        progress['pending_components'].remove('visual_asset_collection')
-            except Exception as e:
-                logger.error(f"Error in async {task_name}: {e}", exc_info=True) # Log Error
-                progress['errors'].append({'component': 'visual_asset_collection', 'error': str(e)})
-                self._log_to_opik("Async Visual asset collection error", "visual_asset_collection_error", {"error": str(e)})
-                if 'visual_asset_collection' in progress['pending_components']:
-                    progress['pending_components'].remove('visual_asset_collection')
-            finally:
-                logger.info(f"Async {task_name} task finished.") # Log Completion
-                research_data['visual_assets'] = visual_assets_result
-                if visual_assets_result and 'visual_asset_collection' in progress['pending_components']:
-                    progress['completed_components'].append('visual_asset_collection')
-                    progress['pending_components'].remove('visual_asset_collection')
-                elif not visual_assets_result and 'visual_asset_collection' not in progress['errors'] and 'visual_asset_collection' in progress['pending_components']:
-                    progress['pending_components'].remove('visual_asset_collection')
-
-        if hasattr(self, 'visual_asset_collector') and self.visual_asset_collector:
-            tasks.append(visual_asset_task())
-        else:
-            if 'visual_asset_collection' in progress['pending_components']:
-                 progress['pending_components'].remove('visual_asset_collection')
-
-
-        # Run all research tasks concurrently
-        await asyncio.gather(*tasks)
-
-        # Calculate completion percentage
-        # total_components = len(progress['completed_components']) + len(progress['pending_components']) + len(progress['errors'])
-        initial_component_count = 7 # Hardcoded initial count
-        completed_count = len(progress['completed_components'])
-        error_count = len(progress['errors'])
-        # Skipped count = initial - completed - errors - pending
-        skipped_count = initial_component_count - completed_count - error_count - len(progress['pending_components'])
-
-        if initial_component_count > 0:
-             # Consider completed / (initial - skipped) as percentage of attempted components
-             attempted_components = initial_component_count - skipped_count
-             if attempted_components > 0:
-                 progress['completion_percentage'] = int(
-                     (completed_count / attempted_components) * 100
-                 )
-             else: # If all were skipped
-                 progress['completion_percentage'] = 100
-        else:
-            progress['completion_percentage'] = 100 # No components to run
-        
-        # Consolidate citations (ensure uniqueness)
-        seen_urls = set()
-        unique_citations = []
-        for citation in research_data.get('citations', []):
-             if isinstance(citation, dict) and citation.get('url') and citation.get('url') not in seen_urls:
-                 seen_urls.add(citation['url'])
-                 unique_citations.append(citation)
-        research_data['citations'] = unique_citations
-        
-        # Log completion of orchestration
-        logger.info(f"Async Research orchestration complete. Completion: {progress['completion_percentage']}%. Errors: {len(progress['errors'])}")
-        self._log_to_opik("Async Research orchestration complete", "async_research_complete", { **progress })
-        
-        # Add progress to research data
-        research_data['progress'] = progress
-        
-        return research_data
+        return final_result
     
     def calculate_readiness_score(self, metadata: Dict[str, Any], research_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -900,7 +896,7 @@ class ResearcherAgent:
         improvement_recommendations = []
         
         # 1. Industry Challenge Analysis Score
-        challenges_count = len(research_data.get('challenges', []))
+        challenges_count = len(research_data.get('industry', {}).get('challenges', [])) # Updated key
         challenges_target = self.readiness_thresholds.get('challenges_target', 10)
         challenges_min = self.readiness_thresholds.get('challenges_min', 2)
         challenges_max = self.readiness_thresholds.get('challenges_max', 15)
@@ -1026,9 +1022,10 @@ class ResearcherAgent:
         total_score += counter_score
         
         # 4. Paradigm Analysis Score
-        paradigms_count = research_data.get('paradigms', {}).get('stats', {}).get('paradigms_count', 0)
-        transitions_count = research_data.get('paradigms', {}).get('stats', {}).get('transitions_count', 0)
-        future_projections_count = research_data.get('paradigms', {}).get('stats', {}).get('future_projections_count', 0)
+        paradigm_data = research_data.get('paradigm', {}) # Updated key
+        paradigms_count = paradigm_data.get('stats', {}).get('paradigms_count', 0)
+        transitions_count = paradigm_data.get('stats', {}).get('transitions_count', 0)
+        future_projections_count = paradigm_data.get('stats', {}).get('future_projections_count', 0)
         
         paradigms_target = self.readiness_thresholds.get('paradigms_target', 3)
         paradigms_points = self.readiness_thresholds.get('paradigms_points', 10)
@@ -1060,8 +1057,12 @@ class ResearcherAgent:
         total_score += paradigm_score
         
         # 5. Audience Analysis Score
-        audience_segments_count = research_data.get('audience', {}).get('stats', {}).get('segments_count', 0)
-        knowledge_gaps_count = research_data.get('audience', {}).get('stats', {}).get('knowledge_gaps_count', 0)
+        audience_data = research_data.get('audience', {}) # Updated key
+        audience_segments_count = audience_data.get('stats', {}).get('segments_count', 0)
+        # Need to update how knowledge gaps are counted if structure changed
+        knowledge_gaps_count = 0
+        for segment in audience_data.get('audience_segments', []):
+             knowledge_gaps_count += len(segment.get('knowledge_evaluation', {}).get('likely_knowledge_gaps', []))
         
         audience_segments_target = self.readiness_thresholds.get('audience_segments_target', 3)
         audience_segments_points = self.readiness_thresholds.get('audience_segments_points', 10)
@@ -1092,8 +1093,9 @@ class ResearcherAgent:
         total_score += audience_score
         
         # 6. Visual Assets Score - Critical Component for B grade or higher
-        solution_visuals_count = len(research_data.get('visual_assets', {}).get('solution_visuals', []))
-        paradigm_visuals_count = len(research_data.get('visual_assets', {}).get('paradigm_visuals', []))
+        visual_assets_data = research_data.get('visuals', {}) # Updated key
+        solution_visuals_count = len(visual_assets_data.get('solution_visuals', []))
+        paradigm_visuals_count = len(visual_assets_data.get('paradigm_visuals', []))
         
         # Solution visuals score
         solution_visuals_target = self.readiness_thresholds.get('solution_visuals_target', 50)
@@ -1137,29 +1139,30 @@ class ResearcherAgent:
         total_score += visual_assets_score
         
         # 7. Analogies Score
-        analogies_data = research_data.get('analogies', {}) # Use .get() for safety
+        analogies_data = research_data.get('analogy', {}) # Updated key
         # Default to empty lists if analogies_data is None or keys are missing
-        challenge_analogies_count = len(analogies_data.get('challenge_analogies', [])) if analogies_data else 0
-        solution_analogies_count = len(analogies_data.get('solution_analogies', [])) if analogies_data else 0
+        # Assuming analogy structure provides generated analogies directly now
+        generated_analogies_count = len(analogies_data.get('generated_analogies', [])) if analogies_data else 0
+        existing_analogies_count = len(analogies_data.get('existing_analogies', [])) if analogies_data else 0
         
-        # Challenge analogies score
+        # Use generated analogies count for scoring (adjust thresholds/logic if needed)
         challenge_analogies_target = self.readiness_thresholds.get('challenge_analogies_target', 3)
         challenge_analogies_min = self.readiness_thresholds.get('challenge_analogies_min', 1)
         challenge_analogies_points = self.readiness_thresholds.get('challenge_analogies_points', 5)
         
-        if challenge_analogies_count >= challenge_analogies_min:
-            challenge_analogies_ratio = min(1.0, challenge_analogies_count / challenge_analogies_target)
+        if generated_analogies_count >= challenge_analogies_min:
+            challenge_analogies_ratio = min(1.0, generated_analogies_count / challenge_analogies_target)
             challenge_analogies_score = challenge_analogies_ratio * challenge_analogies_points
         else:
             challenge_analogies_score = 0
         
-        # Solution analogies score
+        # Solution analogies score - Can reuse generated count or add separate logic
         solution_analogies_target = self.readiness_thresholds.get('solution_analogies_target', 3)
         solution_analogies_min = self.readiness_thresholds.get('solution_analogies_min', 1)
         solution_analogies_points = self.readiness_thresholds.get('solution_analogies_points', 5)
         
-        if solution_analogies_count >= solution_analogies_min:
-            solution_analogies_ratio = min(1.0, solution_analogies_count / solution_analogies_target)
+        if generated_analogies_count >= solution_analogies_min: # Reusing generated count
+            solution_analogies_ratio = min(1.0, generated_analogies_count / solution_analogies_target)
             solution_analogies_score = solution_analogies_ratio * solution_analogies_points
         else:
             solution_analogies_score = 0
@@ -1214,9 +1217,10 @@ class ResearcherAgent:
         total_score += citations_score
         
         # 9. Sequential Thinking Evidence Score - Critical for B grade or higher
-        has_constraints = bool(research_data.get('constraints', []))
-        has_systemic_context = bool(research_data.get('systemic_context', {}))
-        has_stakeholder_perspectives = bool(research_data.get('stakeholder_perspectives', []))
+        # Need to update keys if sequential thinking artifacts are stored differently
+        has_constraints = bool(research_data.get('solution', {}).get('constraints', [])) # Example check
+        has_systemic_context = bool(research_data.get('industry', {}).get('systemic_context', {})) # Example check
+        has_stakeholder_perspectives = bool(research_data.get('audience', {}).get('stakeholder_mapping', {})) # Example check
         
         sequential_evidence_count = sum([has_constraints, has_systemic_context, has_stakeholder_perspectives])
         sequential_evidence_min = self.readiness_thresholds.get('sequential_evidence_min', 1)
@@ -1663,23 +1667,38 @@ class ResearcherAgent:
         
         # System affected / Industry challenges
         report.append("\n### Industry/System Challenges")
-        system = research_data.get('system_affected', {})
-        if system:
-            report.append(f"**Name:** {system.get('name', 'Unknown System')}")
-            report.append(f"**Description:** {system.get('description', 'No description available')}")
-            report.append(f"**Scale:** {system.get('scale', 'Unknown')}")
+        industry_data = research_data.get('industry', {}) # Updated key
+        # Extract system info if available within industry data structure
+        system_name = industry_data.get('system_name', 'Unknown System') 
+        system_desc = industry_data.get('system_description', 'No description available')
+        system_scale = industry_data.get('system_scale', 'Unknown')
+        
+        if system_name != 'Unknown System':
+            report.append(f"**System Name:** {system_name}")
+            report.append(f"**Description:** {system_desc}")
+            report.append(f"**Scale:** {system_scale}")
             
-            challenges = research_data.get('challenges', [])
+            challenges = industry_data.get('challenges', []) # Use updated key
             if challenges:
                 report.append("\n#### Key Challenges")
-                for i, challenge in enumerate(challenges[:5], 1):
-                    if isinstance(challenge, dict):
-                        challenge_title = challenge.get('challenge', challenge.get('name', f'Challenge {i}'))
+                for i, challenge_data in enumerate(challenges[:5], 1):
+                    # challenge_data might now be {'challenge': ..., 'sources': ..., 'components': ...}
+                    challenge = challenge_data # Keep original structure if simple list
+                    if isinstance(challenge_data, dict):
+                         challenge = challenge_data # Or extract from dict if structure changed
+                    
+                    if isinstance(challenge, dict): # Check if challenge is a dict
+                        challenge_title = challenge.get('name', f'Challenge {i}')
                         challenge_desc = challenge.get('description', 'No description available')
                         report.append(f"**{i}. {challenge_title}**")
                         report.append(f"  - {challenge_desc}")
+                        # Optionally add components analysis
+                        components = challenge_data.get('components', {})
+                        if components:
+                             report.append(f"    - Risks: {len(components.get('risk_factors',[]))} factors")
+                             report.append(f"    - Costs: {len(components.get('cost_factors',[]))} factors")
                     else:
-                         report.append(f"**{i}. Invalid challenge format: {challenge}**")
+                         report.append(f"**{i}. Invalid challenge format: {challenge_data}**")
             else:
                  report.append("\nNo challenges identified.")
         else:
@@ -1687,160 +1706,190 @@ class ResearcherAgent:
         
         # Solution analysis
         report.append("\n### Solution Analysis")
-        solution_data = research_data.get('solution', {})
-        proposed_solution = research_data.get('proposed_solution', {})
+        solution_data = research_data.get('solution', {}) # Updated key
+        proposed_solution = metadata.get('proposed_solution', {}) # Get from metadata if needed
         
-        solution_name = solution_data.get('solution', proposed_solution.get('name', 'Proposed Solution'))
-        solution_description = solution_data.get('description', proposed_solution.get('description', 'No description available'))
+        solution_name = solution_data.get('solution_title', proposed_solution.get('name', 'Proposed Solution'))
+        # Assuming description is not directly in solution_data anymore, get from metadata or args if needed
+        solution_description = proposed_solution.get('description', 'No description available') 
         
-        report.append(f"**Name:** {solution_name}")
+        report.append(f"**Solution:** {solution_name}")
+        if solution_description != 'No description available':
         report.append(f"**Description:** {solution_description}")
         
         # Pro arguments
         report.append("\n#### Supporting Arguments")
-        pro_args = solution_data.get('pro_arguments', proposed_solution.get('advantages', []))
-        if pro_args:
-            for i, arg in enumerate(pro_args[:5], 1):
+        pro_args_data = solution_data.get('pro_arguments', []) # Updated key
+        if pro_args_data:
+            for i, arg_data in enumerate(pro_args_data[:5], 1):
+                arg = arg_data.get('argument', {}) # Get inner dict
                 if isinstance(arg, dict):
-                    arg_text = arg.get('argument', arg.get('name', f'Argument {i}'))
+                    arg_text = arg.get('name', f'Argument {i}')
                     report.append(f"**{i}. {arg_text}**")
-                    explanation = arg.get('explanation', arg.get('description', ''))
+                    explanation = arg.get('description', '')
                     if explanation:
                         report.append(f"  - {explanation}")
-                else:
-                    report.append(f"**{i}. {arg}**")
-                    report.append(f"  - {arg}")
+                    # Optionally add prerequisites or metrics
+                    prereqs = arg.get('prerequisites')
+                    if prereqs:
+                        report.append(f"    - Prerequisites: {prereqs}")
+                else: # Handle if inner structure is just a string (fallback)
+                    report.append(f"**{i}. Invalid argument format: {arg_data}**")
         else:
             report.append("No supporting arguments identified.")
         
         # Counter arguments
         report.append("\n#### Counter Arguments")
-        counter_args = solution_data.get('counter_arguments', proposed_solution.get('limitations', []))
-        if counter_args:
-            for i, arg in enumerate(counter_args[:3], 1):
+        counter_args_data = solution_data.get('counter_arguments', []) # Updated key
+        if counter_args_data:
+            for i, arg_data in enumerate(counter_args_data[:3], 1):
+                arg = arg_data.get('argument', {}) # Get inner dict
                 if isinstance(arg, dict):
-                    arg_text = arg.get('argument', arg.get('name', f'Counter-argument {i}'))
+                    arg_text = arg.get('name', f'Counter-argument {i}')
                     report.append(f"**{i}. {arg_text}**")
-                    explanation = arg.get('explanation', arg.get('description', ''))
+                    explanation = arg.get('description', '')
                     if explanation:
                         report.append(f"  - {explanation}")
-                    rebuttal = arg.get('rebuttal', arg.get('defense_rebuttal', ''))
-                    if rebuttal:
-                        report.append(f"  - Rebuttal: {rebuttal}")
-                else:
-                    report.append(f"**{i}. {arg}**")
+                    mitigation = arg.get('mitigation_ideas', [])
+                    if mitigation:
+                        report.append(f"    - Mitigation Ideas: {'; '.join(mitigation)}")
+                else: # Handle if inner structure is just a string (fallback)
+                     report.append(f"**{i}. Invalid argument format: {arg_data}**")
         else:
             report.append("No counter arguments identified.")
+            
+        # Add Metrics if available
+        metrics = solution_data.get('metrics', [])
+        if metrics:
+             report.append("\n#### Key Metrics")
+             for i, metric in enumerate(metrics[:5], 1):
+                  if isinstance(metric, dict):
+                      report.append(f"**{i}. {metric.get('name', 'Metric')}**: {metric.get('importance_context', '')}")
+                      report.append(f"     - Measurement: {metric.get('measurement_method', '')}")
+                      report.append(f"     - Success: {metric.get('success_indicators', '')}")
         
         # Paradigm analysis
         report.append("\n### Historical Paradigm Analysis")
-        paradigm_data = research_data.get('paradigms', {})
-        current_paradigm = research_data.get('current_paradigm', {})
+        paradigm_data = research_data.get('paradigm', {}) # Updated key
         
-        paradigm_name = current_paradigm.get('name', 'Current Approach')
-        if paradigm_data.get('historical_paradigms'):
-            last_paradigm = paradigm_data['historical_paradigms'][-1]
-            paradigm_name = last_paradigm.get('name', paradigm_name)
-            paradigm_desc = last_paradigm.get('description', 'No description available')
+        historical_paradigms = paradigm_data.get('historical_paradigms', [])
+        if historical_paradigms:
+             report.append("\n#### Historical Paradigms")
+             for i, paradigm in enumerate(historical_paradigms[:3], 1):
+                 if isinstance(paradigm, dict):
+                     report.append(f"**{i}. {paradigm.get('name', 'Paradigm')} ({paradigm.get('time_period', '')})**")
+                     report.append(f"   - {paradigm.get('description', '')}")
+                     characteristics = paradigm.get('key_characteristics', [])
+                     if characteristics:
+                          report.append(f"   - Characteristics: {'; '.join(characteristics)}")
         else:
-            paradigm_desc = current_paradigm.get('description', 'No description available')
-        
-        report.append(f"**Name:** {paradigm_name}")
-        report.append(f"**Description:** {paradigm_desc}")
-        
-        limitations = current_paradigm.get('limitations', [])
-        if limitations:
-            report.append("\n#### Limitations")
-            for limitation in limitations:
-                report.append(f"  - {limitation}")
-        elif paradigm_data.get('lessons'):
+             report.append("\nNo historical paradigms identified.")
+
+        transitions = paradigm_data.get('transitions', [])
+        if transitions:
+             report.append("\n#### Key Transitions")
+             for i, transition in enumerate(transitions[:2], 1):
+                 if isinstance(transition, dict):
+                     report.append(f"**{i}. {transition.get('from_paradigm', '')} -> {transition.get('to_paradigm', '')}**")
+                     report.append(f"   - Triggers: {transition.get('trigger_factors', '')}")
+                     report.append(f"   - Tensions: {transition.get('core_tensions', '')}")
+
+        lessons = paradigm_data.get('lessons', [])
+        if lessons:
             report.append("\n#### Key Lessons")
-            for i, lesson in enumerate(paradigm_data.get('lessons', [])[:3], 1):
+             for i, lesson in enumerate(lessons[:3], 1):
                  if isinstance(lesson, dict):
                      report.append(f"**{i}. {lesson.get('lesson', 'Lesson')}**: {lesson.get('explanation', '')}")
+                      report.append(f"     - Relevance: {lesson.get('relevance_today', '')}")
+
+        future_paradigms = paradigm_data.get('future_paradigms', [])
+        if future_paradigms:
+             report.append("\n#### Future Projections")
+             for i, future in enumerate(future_paradigms[:2], 1):
+                 if isinstance(future, dict):
+                     report.append(f"**{i}. {future.get('name', 'Future Paradigm')}**")
+                     report.append(f"   - {future.get('description', '')}")
+                     report.append(f"   - Conditions: {future.get('emergence_conditions', '')}")
+                     report.append(f"   - Implications: {future.get('potential_implications', '')}")
         
         # Audience analysis
         report.append("\n### Audience Analysis")
-        audience_data = research_data.get('audience', {})
-        audience_analysis_legacy = research_data.get('audience_analysis', {})
+        audience_data = research_data.get('audience', {}) # Updated key
+        segments = audience_data.get('audience_segments', [])
         
-        knowledge_level = audience_data.get('knowledge_level', audience_analysis_legacy.get('knowledge_level', 'moderate'))
-        background = audience_data.get('background', audience_analysis_legacy.get('background', 'General audience'))
-        
-        report.append(f"**Knowledge Level:** {knowledge_level}")
-        report.append(f"**Background:** {background}")
-        
-        interests = audience_data.get('interests', audience_analysis_legacy.get('interests', []))
-        if interests:
-            report.append("\n#### Key Interests")
-            for interest in interests:
-                report.append(f"  - {interest}")
-        elif audience_data.get('audience_segments'):
+        if segments:
              report.append("\n#### Identified Segments")
-             for i, segment in enumerate(audience_data.get('audience_segments', [])[:3], 1):
+            for i, segment in enumerate(segments[:3], 1):
                  if isinstance(segment, dict):
-                     report.append(f"**{i}. {segment.get('name', 'Segment')}**: {segment.get('description', '')}")
+                     report.append(f"**{i}. {segment.get('name', 'Segment')}**")
+                     report.append(f"   - Description: {segment.get('description', '')}")
+                     report.append(f"   - Knowledge: {segment.get('knowledge_evaluation', {}).get('technical_depth_tolerance', segment.get('knowledge_level','Unknown'))}") # Use new or old key
+                     pain_points = segment.get('needs_analysis', {}).get('core_pain_points', segment.get('pain_points',[])) # Use new or old key
+                     if pain_points:
+                          report.append(f"   - Pain Points: {'; '.join(pain_points[:2])}")
+                     # Optionally add content strategies
+                     strategies = segment.get('content_strategies', [])
+                     if strategies:
+                          strategy_titles = [s.get('title', 'Strategy') for s in strategies[:2]]
+                          report.append(f"   - Suggested Strategies: {'; '.join(strategy_titles)}")
+        else:
+            report.append("\nNo specific audience segments identified.")
         
         # Analogies
         report.append("\n### Powerful Analogies")
-        analogies_data = research_data.get('analogies', {})
-        if analogies_data:
-            challenge_analogies = analogies_data.get('challenge_analogies', [])
-            solution_analogies = analogies_data.get('solution_analogies', [])
+        analogies_data = research_data.get('analogy', {}) # Updated key
             generated_analogies = analogies_data.get('generated_analogies', [])
+        existing_analogies = analogies_data.get('existing_analogies', [])
             
-            all_analogies = challenge_analogies + solution_analogies + generated_analogies
+        all_analogies = generated_analogies + existing_analogies
             
             if all_analogies:
                 displayed_count = 0
                 for i, analogy in enumerate(all_analogies):
                      if displayed_count >= 4: break
                      if isinstance(analogy, dict):
-                         title = analogy.get('title', analogy.get('analogy', f'Analogy {i+1}'))
-                         desc = analogy.get('description', analogy.get('explanation', 'No description available'))
-                         report.append(f"**{displayed_count+1}. {title}**")
+                     title = analogy.get('title', f'Analogy {i+1}')
+                     desc = analogy.get('description', 'No description available')
+                     domain = analogy.get('domain', 'Unknown Domain')
+                     report.append(f"**{displayed_count+1}. {title} (Domain: {domain})**")
                          report.append(f"  - {desc}")
+                     # Optionally add evaluation score if available
+                     score = analogy.get("evaluation", {}).get("overall_score")
+                     if score is not None:
+                          report.append(f"  - Score: {float(score):.1f}/10")
                          displayed_count += 1
-            else:
-                report.append("No analogies identified.")
         else:
             report.append("No analogies identified.")
         
         # Visual assets
-        visual_assets_data = research_data.get('visual_assets', {})
+        visual_assets_data = research_data.get('visuals', {}) # Updated key
         if visual_assets_data:
             solution_visuals = visual_assets_data.get('solution_visuals', [])
             paradigm_visuals = visual_assets_data.get('paradigm_visuals', [])
-            if not solution_visuals and not paradigm_visuals and isinstance(visual_assets_data, list):
-                 solution_visuals = visual_assets_data
+             analogy_visuals = visual_assets_data.get('analogy_visuals', []) # Check if VAC collects these now
             
-            if solution_visuals or paradigm_visuals:
+             all_visuals = solution_visuals + paradigm_visuals + analogy_visuals
+             
+             if all_visuals:
                 report.append("\n### Visual Assets")
+                report.append(f"Total collected: {visual_assets_data.get('stats',{}).get('total_collected', len(all_visuals))}")
                 displayed_count = 0
                 
-                for i, visual in enumerate(solution_visuals):
-                    if displayed_count >= 3: break
-                    if isinstance(visual, dict):
-                        title = visual.get('title', f'Solution Visual {i+1}')
-                        url = visual.get('url', 'No URL available')
-                        caption = visual.get('caption', visual.get('description', 'No caption available'))
-                        
-                        report.append(f"**{displayed_count+1}. {title}**")
-                        report.append(f"  - URL: {url}")
-                        report.append(f"  - Caption: {caption}")
-                        displayed_count += 1
-                
-                for i, visual in enumerate(paradigm_visuals):
+                # Display a sample
+                for i, visual in enumerate(all_visuals):
                     if displayed_count >= 5: break
                     if isinstance(visual, dict):
-                        title = visual.get('title', f'Paradigm Visual {i+1}')
+                        title = visual.get('title', visual.get('alt_text', f'Visual {i+1}'))
                         url = visual.get('url', 'No URL available')
-                        caption = visual.get('caption', visual.get('description', 'No caption available'))
+                        category = visual.get('category', 'Unknown')
                         
-                        report.append(f"**{displayed_count+1}. {title}**")
+                        report.append(f"**{displayed_count+1}. {title} (Category: {category})**")
                         report.append(f"  - URL: {url}")
-                        report.append(f"  - Caption: {caption}")
                         displayed_count += 1
+             else:
+                  report.append("\nNo visual assets collected.")
+        else:
+             report.append("\nNo visual asset data available.")
         
         # Citations
         report.append("\n## Citations")
@@ -1934,25 +1983,37 @@ class ResearcherAgent:
                             "final_release": {"complete": False}
                         },
                         "readiness_score": readiness_score,
-                        # Enhanced schema for research statistics
+                        # Enhanced schema for research statistics (Update keys)
                         "research_stats": {
                             "industry_analysis": {
-                                "challenges_count": len(research_data.get('industry_analysis', {}).get('challenges', [])),
-                                "sources_count": len(research_data.get('citations', [])),
+                                "challenges_count": len(research_data.get('industry', {}).get('challenges', [])),
+                                "sources_count": research_data.get('industry', {}).get('total_sources', 0), # Example
                             },
                             "proposed_solution": {
-                                "pro_arguments_count": len(research_data.get('proposed_solution', {}).get('pro_arguments', [])),
-                                "counter_arguments_count": len(research_data.get('proposed_solution', {}).get('counter_arguments', [])),
-                                "visual_assets_count": len(research_data.get('visual_assets', [])),
+                                "pro_arguments_count": len(research_data.get('solution', {}).get('pro_arguments', [])),
+                                "counter_arguments_count": len(research_data.get('solution', {}).get('counter_arguments', [])),
+                                "metrics_count": len(research_data.get('solution', {}).get('metrics', [])),
+                                "visual_assets_count": len(research_data.get('visuals', {}).get('solution_visuals', [])), # Example from visuals
                             },
-                            "current_paradigm": {
-                                "alternatives_count": len(research_data.get('current_paradigm', {}).get('alternatives', [])),
+                            "paradigm_analysis": { # New structure
+                                "historical_paradigms_count": len(research_data.get('paradigm', {}).get('historical_paradigms', [])),
+                                "transitions_count": len(research_data.get('paradigm', {}).get('transitions', [])),
+                                "lessons_count": len(research_data.get('paradigm', {}).get('lessons', [])),
+                                "future_projections_count": len(research_data.get('paradigm', {}).get('future_paradigms', [])),
                             },
                             "audience_analysis": {
-                                "knowledge_gaps_count": len(research_data.get('audience_analysis', {}).get('knowledge_gaps', [])),
-                                "acronyms_count": len(research_data.get('audience_analysis', {}).get('acronyms', [])),
-                                "analogies_count": len(research_data.get('analogies', {}).get('generated_analogies', [])),
+                                "segments_count": len(research_data.get('audience', {}).get('audience_segments', [])),
+                                # Add more details if needed, e.g., average pain points per segment
                             },
+                             "analogy_generation": { # New structure
+                                 "generated_analogies_count": len(research_data.get('analogy', {}).get('generated_analogies', [])),
+                                 "existing_analogies_count": len(research_data.get('analogy', {}).get('existing_analogies', [])),
+                                 "average_score": research_data.get('analogy', {}).get('stats', {}).get('average_score', 0),
+                             },
+                             "visual_asset_collection": { # New structure
+                                 "total_collected": research_data.get('visuals', {}).get('stats', {}).get('total_collected', 0),
+                             },
+                            "citations_count": len(research_data.get('citations', [])), # Overall citations
                         }
                     }
                 ]
@@ -1987,23 +2048,19 @@ class ResearcherAgent:
                 "blog_title": blog_title,
                 "version": version,
                 "data": research_data,
+                # Update keys for sequential thinking if structure changed
                 "sequential_thinking": {
-                    "constraints": research_data.get('constraints', []),
-                    "systemic_context": research_data.get('systemic_context', {}),
-                    "stakeholder_perspectives": research_data.get('stakeholder_perspectives', []),
+                    "constraints": research_data.get('solution', {}).get('constraints', []),
+                    "systemic_context": research_data.get('industry', {}).get('systemic_context', {}),
+                    "stakeholder_perspectives": research_data.get('audience', {}).get('stakeholder_mapping', {}),
                     "challenges_solutions": {
-                        "industry_challenges": research_data.get('industry_analysis', {}).get('challenges', []),
-                        "proposed_solutions": research_data.get('proposed_solution', {})
+                        "industry_challenges": research_data.get('industry', {}).get('challenges', []),
+                        "proposed_solutions": research_data.get('solution', {}) # Or more specific part
                     },
                     "supporting_evidence": research_data.get('citations', []),
-                    "counter_arguments": research_data.get('proposed_solution', {}).get('counter_arguments', [])
+                    "counter_arguments": research_data.get('solution', {}).get('counter_arguments', [])
                 },
-                "constraint_analysis": {
-                    "technical_constraints": research_data.get('constraints_analysis', {}).get('technical', []),
-                    "financial_constraints": research_data.get('constraints_analysis', {}).get('financial', []),
-                    "social_constraints": research_data.get('constraints_analysis', {}).get('social', []),
-                    "regulatory_constraints": research_data.get('constraints_analysis', {}).get('regulatory', [])
-                },
+                "constraint_analysis": research_data.get('constraints_analysis', {}), # If generated
                 "readiness_score": readiness_score,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "version_history": [
@@ -2064,15 +2121,18 @@ class ResearcherAgent:
             
             logger.info(f"Stored {len(image_ids)} blog images")
             
-            # Store visual assets from research
+            # Store visual assets from research (Update key)
             visual_asset_ids = []
+            visuals_data = research_data.get('visuals', {})
+            all_collected_visuals = (
+                visuals_data.get('solution_visuals', []) +
+                visuals_data.get('paradigm_visuals', []) +
+                visuals_data.get('analogy_visuals', []) +
+                visuals_data.get('other_visuals', []) # Add other categories if VAC uses them
+            )
             
-            # Store visual assets from analogies
-            for analogy in research_data.get('analogies', {}).get('generated_analogies', []):
-                visual = analogy.get('visual', {})
-                assets = visual.get('assets', [])
-                
-                for asset in assets:
+            for asset in all_collected_visuals:
+                 if isinstance(asset, dict): # Ensure it's a dict
                     asset_id = self.db_client.store_media(
                         blog_title,
                         version,
@@ -2080,22 +2140,8 @@ class ResearcherAgent:
                         "firecrawl",
                         asset.get('url'),
                         asset.get('base64'),
-                        f"Visual for {analogy.get('title', 'analogy')}",
-                        "analogy"
-                    )
-                    visual_asset_ids.append(asset_id)
-            
-            # Store visual assets from solution and paradigm
-            for asset in research_data.get('visual_assets', []):
-                asset_id = self.db_client.store_media(
-                    blog_title,
-                    version,
-                    asset.get('format', 'image'),
-                    asset.get('source', 'firecrawl'),
-                    asset.get('url'),
-                    asset.get('base64'),
-                    asset.get('alt_text', 'Visual asset'),
-                    asset.get('category', 'solution')
+                         f"Visual for {asset.get('title', 'visual')}",
+                         "visual"
                 )
                 visual_asset_ids.append(asset_id)
             
@@ -2105,7 +2151,7 @@ class ResearcherAgent:
             yaml_path = create_tracker_yaml(blog_title, version, research_data)
             logger.info(f"Created YAML tracker: {yaml_path}")
             
-            # Update research stats in blog document
+            # Update research stats in blog document (using potentially updated structure)
             self.db_client.update_research_stats(
                 blog_title,
                 version,
@@ -2248,33 +2294,193 @@ class ResearcherAgent:
             process_progress['stages']['research_gathering']['status'] = 'in_progress'
             process_progress['stages']['research_gathering']['started_at'] = datetime.now().isoformat()
             
+            research_result = {} # Initialize empty dict
             try:
                 # Gather research data (using await)
-                research_data = await self.gather_research(metadata) 
+                # gather_research now returns dict like {"research_data": {...}, "errors": {...}, "metadata": {...}}
+                research_result = await self.gather_research(metadata) 
+                research_data = research_result.get("research_data", {}) # Extract the data part
+                research_errors = research_result.get("errors", {}) # Extract errors part
                 
-                # ... (Rest of research gathering stage logic remains the same) ...
+                # Update progress based on research_errors
+                if research_errors:
+                     process_progress['stages']['research_gathering']['status'] = 'partial_success'
+                     process_progress['stages']['research_gathering']['errors'] = list(research_errors.values())
+                     process_progress['result_summary']['research_errors'] = research_errors
+                     logger.warning(f"Research gathering completed with errors: {research_errors}")
+                else:
+                    process_progress['stages']['research_gathering']['status'] = 'complete'
+                
+                process_progress['stages']['research_gathering']['completed_at'] = datetime.now().isoformat()
+                process_progress['result_summary']['research_components'] = list(research_data.keys())
+                
+                self._log_to_opik("Research gathering complete", "research_gathering_complete", {
+                    "components_successful": list(research_data.keys()),
+                    "components_failed": list(research_errors.keys())
+                })
                 
             except Exception as e:
-                # ... (Error handling for research gathering remains the same) ...
-                raise
+                error_msg = f"Critical error during research gathering: {e}"
+                logger.error(error_msg, exc_info=True) # Log traceback for critical errors
+                process_progress['stages']['research_gathering']['status'] = 'error'
+                process_progress['stages']['research_gathering']['completed_at'] = datetime.now().isoformat()
+                process_progress['stages']['research_gathering']['errors'].append(str(e))
+                self._log_to_opik("Research gathering error", "research_gathering_error", {"error": str(e)})
+                raise # Re-raise critical errors to stop processing
             
             # STAGE 4: Calculate readiness score (Synchronous)
-            # ... (Readiness calculation logic remains the same) ...
+            process_progress['current_stage'] = 'readiness_calculation'
+            process_progress['stages']['readiness_calculation']['status'] = 'in_progress'
+            process_progress['stages']['readiness_calculation']['started_at'] = datetime.now().isoformat()
+            
+            readiness_info = {}
+            try:
+                # Use the research_data obtained from gather_research
+                readiness_info = self.calculate_readiness_score(metadata, research_data)
+                readiness_score = readiness_info.get('score', 0.0)
+                readiness_grade = readiness_info.get('grade', 'F')
+                
+                process_progress['stages']['readiness_calculation']['status'] = 'complete'
+                process_progress['stages']['readiness_calculation']['completed_at'] = datetime.now().isoformat()
+                process_progress['result_summary']['readiness'] = {
+                    'score': readiness_score,
+                    'grade': readiness_grade
+                }
+                self._log_to_opik("Readiness calculation complete", "readiness_calculation_complete", {
+                    "score": readiness_score, "grade": readiness_grade
+                })
+            except Exception as e:
+                error_msg = f"Error calculating readiness score: {e}"
+                logger.error(error_msg)
+                process_progress['stages']['readiness_calculation']['status'] = 'error'
+                process_progress['stages']['readiness_calculation']['completed_at'] = datetime.now().isoformat()
+                process_progress['stages']['readiness_calculation']['errors'].append(str(e))
+                self._log_to_opik("Readiness calculation error", "readiness_calculation_error", {"error": str(e)})
+                # Decide if this is critical - maybe allow processing to continue without score?
+                readiness_score = 0.0 # Default score on error
+                readiness_grade = 'N/A'
             
             # STAGE 5: Generate research report (Synchronous)
-            # ... (Report generation logic remains the same) ...
+            process_progress['current_stage'] = 'report_generation'
+            process_progress['stages']['report_generation']['status'] = 'in_progress'
+            process_progress['stages']['report_generation']['started_at'] = datetime.now().isoformat()
+            
+            report_markdown = ""
+            try:
+                # Use the research_data obtained from gather_research
+                report_markdown = self.generate_research_report(
+                    blog_data,
+                    metadata,
+                    research_data,
+                    readiness_score # Use score calculated above
+                )
+                
+                process_progress['stages']['report_generation']['status'] = 'complete'
+                process_progress['stages']['report_generation']['completed_at'] = datetime.now().isoformat()
+                process_progress['result_summary']['report_length'] = len(report_markdown)
+                self._log_to_opik("Report generation complete", "report_generation_complete", {"length": len(report_markdown)})
+            except Exception as e:
+                 error_msg = f"Error generating report: {e}"
+                 logger.error(error_msg)
+                 process_progress['stages']['report_generation']['status'] = 'error'
+                 process_progress['stages']['report_generation']['completed_at'] = datetime.now().isoformat()
+                 process_progress['stages']['report_generation']['errors'].append(str(e))
+                 self._log_to_opik("Report generation error", "report_generation_error", {"error": str(e)})
+                 # Continue processing, but report generation failed
             
             # STAGE 6: Save results (Synchronous)
-            # ... (Result saving logic remains the same) ...
+            process_progress['current_stage'] = 'result_saving'
+            process_progress['stages']['result_saving']['status'] = 'in_progress'
+            process_progress['stages']['result_saving']['started_at'] = datetime.now().isoformat()
             
-            # ... (Success return logic remains the same, including report_url) ...
+            save_result = {}
+            report_url = None # Initialize report URL
+            try:
+                # Use the research_data obtained from gather_research
+                save_result = self.save_research_results(
+                    blog_data,
+                    metadata,
+                    research_data,
+                    readiness_score, # Use calculated score
+                    report_markdown # Use generated report
+                )
+                
+                # Construct report URL if Opik server is configured and report ID exists
+                if self.opik_server and save_result.get('report_id'):
+                    report_url = f"{self.opik_server}/reports/{save_result['report_id']}" # Example URL structure
+                
+                process_progress['stages']['result_saving']['status'] = 'complete'
+                process_progress['stages']['result_saving']['completed_at'] = datetime.now().isoformat()
+                process_progress['result_summary']['save_info'] = {
+                     "report_id": str(save_result.get('report_id')),
+                     "research_data_id": str(save_result.get('research_data_id')),
+                     "image_count": len(save_result.get('image_ids', [])),
+                     "visual_asset_count": len(save_result.get('visual_asset_ids', [])),
+                     "yaml_path": save_result.get('yaml_path')
+                 }
+                self._log_to_opik("Result saving complete", "result_saving_complete", process_progress['result_summary']['save_info'])
+        except Exception as e:
+                error_msg = f"Error saving results: {e}"
+                logger.error(error_msg)
+                process_progress['stages']['result_saving']['status'] = 'error'
+                process_progress['stages']['result_saving']['completed_at'] = datetime.now().isoformat()
+                process_progress['stages']['result_saving']['errors'].append(str(e))
+                self._log_to_opik("Result saving error", "result_saving_error", {"error": str(e)})
+                # Continue processing, but saving failed
+            
+            # Determine overall status
+            has_errors = any(stage['status'] == 'error' for stage in process_progress['stages'].values())
+            has_partial = any(stage['status'] == 'partial_success' for stage in process_progress['stages'].values())
+            
+            if has_errors:
+                process_progress['status'] = 'error'
+            elif has_partial:
+                process_progress['status'] = 'partial_success'
+            else:
+                 process_progress['status'] = 'success'
+
+            end_time = datetime.now()
+            process_progress['completed_at'] = end_time.isoformat()
+            process_progress['duration_seconds'] = (end_time - start_time).total_seconds()
+            
+            self._log_to_opik("Blog processing finished", "blog_processing_complete", {
+                 "final_status": process_progress['status'],
+                 "duration": process_progress['duration_seconds']
+            })
+            
+            # Return the final result structure including research data and errors
+            return {
+                "status": process_progress['status'],
+                "research_data": research_data, # Include the actual data
+                "errors": research_errors, # Include the errors encountered
+                "progress": process_progress, # Include detailed progress
+                "report_url": report_url # Include report URL if available
+            }
 
         except Exception as e:
-            # ... (Overall error handling remains the same) ...
+            # Catch errors from synchronous stages or re-raised critical errors
+            end_time = datetime.now()
+            process_progress['status'] = 'error'
+            process_progress['completed_at'] = end_time.isoformat()
+            process_progress['duration_seconds'] = (end_time - start_time).total_seconds()
+            # Add error to the relevant stage if possible, otherwise general error
+            current_stage = process_progress['current_stage']
+            if current_stage and current_stage in process_progress['stages']:
+                 process_progress['stages'][current_stage]['status'] = 'error'
+                 process_progress['stages'][current_stage]['errors'].append(str(e))
+            
+            logger.error(f"Overall processing failed at stage '{current_stage}': {e}", exc_info=True)
+            self._log_to_opik("Blog processing failed", "blog_processing_error", {
+                 "stage": current_stage, "error": str(e)
+            })
+            
+            # Return error structure
             return {
-                'status': 'error',
-                'error': str(e),
-                'progress': process_progress
+                "status": "error",
+                "error": str(e),
+                "research_data": {}, # Empty data on critical failure
+                "errors": {current_stage or "overall": str(e)}, # Log the error source
+                "progress": process_progress
             }
 
     def _log_to_opik(self, message: str, event_type: str, data: Dict[str, Any]) -> bool:
@@ -2390,4 +2596,13 @@ def main():
 
 if __name__ == "__main__":
     # Calls async function correctly
+    # asyncio.run(main()) - This was causing issues with `await agent.process_blog`
+    # Correct way to run the top-level async function:
+    try:
     asyncio.run(main()) 
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by user.")
+        sys.exit(1)
+    except Exception as e:
+        logger.critical(f"Unhandled exception in main execution: {e}", exc_info=True)
+        sys.exit(1)

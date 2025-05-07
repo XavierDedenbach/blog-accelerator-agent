@@ -14,11 +14,12 @@ from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
 import asyncio
+import inspect
 
 from langchain.callbacks.manager import CallbackManagerForChainRun
 from langchain.chains.llm import LLMChain
 from langchain.prompts import PromptTemplate
-from langchain.chat_models import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain.schema.runnable import RunnableConfig
 
 # Import Groq model dynamically to avoid import errors
@@ -59,9 +60,8 @@ class AnalogyGenerator:
     
     def __init__(
         self,
-        openai_api_key: Optional[str] = None,
-        groq_api_key: Optional[str] = None,
-        source_validator: Optional[SourceValidator] = None,
+        llm: BaseChatModel,
+        source_validator: SourceValidator,
         firecrawl_client: Optional[FirecrawlClient] = None,
         min_analogies: int = 3
     ):
@@ -69,38 +69,14 @@ class AnalogyGenerator:
         Initialize the analogy generator.
         
         Args:
-            openai_api_key: OpenAI API key
-            groq_api_key: Groq API key
+            llm: Language model instance.
             source_validator: SourceValidator instance
             firecrawl_client: FirecrawlClient instance
             min_analogies: Minimum number of analogies to generate
         """
-        self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
-        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY")
-        
-        # Try to use OpenAI first, fall back to Groq
-        if self.openai_api_key:
-            self.llm = ChatOpenAI(
-                model_name="gpt-4",
-                temperature=0.5,
-                openai_api_key=self.openai_api_key
-            )
-        elif self.groq_api_key:
-            self.llm = ChatGroq(
-                model_name="llama3-70b-8192",
-                temperature=0.5,
-                groq_api_key=self.groq_api_key
-            )
-        else:
-            raise AnalogyGenerationError("No API key provided for LLM")
-        
-        # Initialize source validator if not provided
-        self.source_validator = source_validator or SourceValidator()
-        
-        # Initialize firecrawl client if not provided
+        self.initial_llm = llm
+        self.source_validator = source_validator
         self.firecrawl_client = firecrawl_client or FirecrawlClient()
-        
-        # Set minimum analogies threshold
         self.min_analogies = min_analogies
         
         # Define domain categories for cross-domain analogies
@@ -242,7 +218,8 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
     async def generate_domain_analogies(
         self,
         concept: str,
-        num_analogies: int = None
+        num_analogies: int = None,
+        llm_override: Optional[BaseChatModel] = None
     ) -> List[Dict[str, Any]]:
         """
         Generate analogies from different domains for a concept.
@@ -250,6 +227,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
         Args:
             concept: Concept to explain with analogies
             num_analogies: Number of analogies to generate (default: self.min_analogies)
+            llm_override: Language model to use for generation
             
         Returns:
             List of analogy dictionaries
@@ -262,8 +240,9 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             domains_text = "\n".join([f"- {domain}" for domain in self.domains])
             
             # Create chain for analogy generation
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.generate_analogies_prompt
             )
             
@@ -280,6 +259,10 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             logger.info(f"Generated {len(analogies)} analogies for concept: {concept}")
             return analogies
             
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error generating analogies for {concept}: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise AnalogyGenerationError(f"Failed to parse analogies JSON: {e}")
         except Exception as e:
             logger.error(f"Error generating analogies for {concept}: {e}")
             raise AnalogyGenerationError(f"Failed to generate analogies: {e}")
@@ -287,7 +270,8 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
     async def evaluate_analogy(
         self, 
         concept: str,
-        analogy: Dict[str, Any]
+        analogy: Dict[str, Any],
+        llm_override: Optional[BaseChatModel] = None
     ) -> Dict[str, Any]:
         """
         Evaluate an analogy based on multiple criteria.
@@ -295,6 +279,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
         Args:
             concept: Concept the analogy explains
             analogy: Analogy dictionary
+            llm_override: Language model to use for evaluation
             
         Returns:
             Dictionary with evaluation scores and feedback
@@ -307,8 +292,9 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             analogy_text += f"Mapping: {analogy.get('mapping', 'No mapping specified')}\n"
             
             # Create chain for analogy evaluation
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.evaluate_analogy_prompt
             )
             
@@ -324,6 +310,10 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             logger.info(f"Evaluated analogy: {analogy.get('title', 'Untitled')} - Score: {evaluation.get('overall_score', 0)}/10")
             return evaluation
             
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error evaluating analogy {analogy.get('title', 'Untitled')}: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise AnalogyGenerationError(f"Failed to parse evaluation JSON: {e}")
         except Exception as e:
             logger.error(f"Error evaluating analogy {analogy.get('title', 'Untitled')}: {e}")
             raise AnalogyGenerationError(f"Failed to evaluate analogy: {e}")
@@ -332,7 +322,8 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
         self,
         concept: str,
         analogy: Dict[str, Any],
-        evaluation: Dict[str, Any]
+        evaluation: Dict[str, Any],
+        llm_override: Optional[BaseChatModel] = None
     ) -> Dict[str, Any]:
         """
         Refine an analogy based on evaluation feedback.
@@ -341,6 +332,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             concept: Concept the analogy explains
             analogy: Original analogy dictionary
             evaluation: Evaluation feedback dictionary
+            llm_override: Language model to use for refinement
             
         Returns:
             Dictionary with refined analogy
@@ -367,8 +359,9 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
                     evaluation_text += f"{i}. {suggestion}\n"
             
             # Create chain for analogy refinement
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.refine_analogy_prompt
             )
             
@@ -385,6 +378,10 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             logger.info(f"Refined analogy: {analogy.get('title', 'Untitled')} -> {refined_analogy.get('title', 'Untitled')}")
             return refined_analogy
             
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error refining analogy {analogy.get('title', 'Untitled')}: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise AnalogyGenerationError(f"Failed to parse refined analogy JSON: {e}")
         except Exception as e:
             logger.error(f"Error refining analogy {analogy.get('title', 'Untitled')}: {e}")
             raise AnalogyGenerationError(f"Failed to refine analogy: {e}")
@@ -392,7 +389,8 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
     async def search_existing_analogies(
         self,
         concept: str,
-        count: int = 5
+        count: int = 5,
+        llm_override: Optional[BaseChatModel] = None
     ) -> List[Dict[str, Any]]:
         """
         Search for existing analogies in literature and online sources.
@@ -400,6 +398,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
         Args:
             concept: Concept to search analogies for
             count: Number of search results to analyze
+            llm_override: Language model to use for search
             
         Returns:
             List of existing analogy dictionaries
@@ -421,8 +420,9 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
                 results_text += f"Description: {result.get('description', 'No description')}\n\n"
             
             # Create chain for extracting existing analogies
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.search_existing_analogies_prompt
             )
             
@@ -438,6 +438,10 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             logger.info(f"Found {len(existing_analogies)} existing analogies for concept: {concept}")
             return existing_analogies
             
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error searching existing analogies for {concept}: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise AnalogyGenerationError(f"Failed to parse existing analogies JSON: {e}")
         except Exception as e:
             logger.error(f"Error searching existing analogies for {concept}: {e}")
             raise AnalogyGenerationError(f"Failed to search existing analogies: {e}")
@@ -468,15 +472,27 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             visual_assets = []
             try:
                 if self.firecrawl_client:
-                    visual_assets = await self.firecrawl_client.search_images(query)
-                
-                # If no images found with Firecrawl, try Brave API if available
+                    # Attempt Firecrawl first
+                    firecrawl_result = self.firecrawl_client.search_images(query)
+                    if inspect.isawaitable(firecrawl_result):
+                        visual_assets = await firecrawl_result
+                    else:
+                        visual_assets = firecrawl_result # Assume direct result if not awaitable
+
+                # If no images found with Firecrawl or Firecrawl client not available, try Brave API fallback
                 if not visual_assets and self.source_validator:
                     logger.info(f"Falling back to Brave API for images for analogy: {analogy.get('title', 'Untitled')}")
                     try:
-                        # Use search_web directly and await the result
-                        search_results = await self.source_validator.search_web(f"{query} image", count=5)
-                        
+                        # Call search_web
+                        search_result_or_coroutine = self.source_validator.search_web(f"{query} image", count=5)
+
+                        # Check if the result needs to be awaited
+                        if inspect.isawaitable(search_result_or_coroutine):
+                            search_results = await search_result_or_coroutine
+                        else:
+                            # Assume it returned the result directly
+                            search_results = search_result_or_coroutine
+
                         # Ensure search_results is iterable (e.g., a list) before processing
                         if isinstance(search_results, list):
                             # Format results as visual assets
@@ -497,9 +513,10 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
                         logger.error(f"Error searching for images with Brave API fallback: {e}", exc_info=True)
                         visual_assets = [] # Ensure visual_assets remains empty on error
             except Exception as e:
-                logger.error(f"Error searching for images: {e}")
+                # Catch errors during the initial Firecrawl attempt or general errors
+                logger.error(f"Error searching for images: {e}", exc_info=True) # Added exc_info for more detail
                 visual_assets = []
-            
+
             if not visual_assets:
                 logger.warning(f"No visual assets found for analogy: {analogy.get('title', 'Untitled')}")
                 return {"success": False, "assets": []}
@@ -519,7 +536,8 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
     async def generate_analogies(
         self,
         concept: str,
-        refinement_threshold: float = 7.0
+        refinement_threshold: float = 7.0,
+        llm_override: Optional[BaseChatModel] = None
     ) -> Dict[str, Any]:
         """
         Perform complete analogy generation process for a concept.
@@ -527,6 +545,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
         Args:
             concept: Concept to explain with analogies
             refinement_threshold: Minimum score for analogies (below this will be refined)
+            llm_override: Language model to use for generation
             
         Returns:
             Dictionary with generated analogies and metadata
@@ -537,11 +556,11 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
         try:
             # Generate initial analogies
             logger.info(f"Generating analogies for concept: {concept}")
-            initial_analogies = await self.generate_domain_analogies(concept)
+            initial_analogies = await self.generate_domain_analogies(concept, llm_override=llm_override)
             
             # Search for existing analogies
             logger.info(f"Searching for existing analogies for concept: {concept}")
-            existing_analogies = await self.search_existing_analogies(concept)
+            existing_analogies = await self.search_existing_analogies(concept, llm_override=llm_override)
             
             # Evaluate and refine analogies
             evaluated_analogies = []
@@ -550,7 +569,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
             for analogy in initial_analogies:
                 logger.info(f"Evaluating analogy: {analogy.get('title', '')}")
                 try:
-                    evaluation = await self.evaluate_analogy(concept, analogy)
+                    evaluation = await self.evaluate_analogy(concept, analogy, llm_override=llm_override)
                     
                     # Ensure evaluation and score exist and are floats before comparison
                     overall_score = evaluation.get('overall_score')
@@ -562,7 +581,7 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
                         # Refine if below threshold
                         if overall_score < refinement_threshold:
                             logger.info(f"Refining analogy: {analogy.get('title', '')} (Score: {overall_score:.1f})")
-                            refined_analogy = await self.refine_analogy(concept, analogy, evaluation)
+                            refined_analogy = await self.refine_analogy(concept, analogy, evaluation, llm_override=llm_override)
                             refined_analogies.append(refined_analogy)
                         else:
                             # Keep the original if score is good enough
@@ -579,22 +598,44 @@ Only respond with the JSON array. If no clear analogies are found, return an emp
 
             # Generate visual representations
             logger.info(f"Generating visual representations for {len(refined_analogies)} refined analogies")
-            visual_representations = await asyncio.gather(*[self.generate_visual_representation(a) for a in refined_analogies])
+            visual_results = await asyncio.gather(*[self.generate_visual_representation(a) for a in refined_analogies])
+            
+            # Integrate visual results into refined_analogies
+            for i, vis_result in enumerate(visual_results):
+                if i < len(refined_analogies):
+                     # Ensure the 'visual' key exists
+                     if 'visual' not in refined_analogies[i]:
+                         refined_analogies[i]['visual'] = {}
+                     # Merge visual results, prioritizing new data but keeping existing if needed
+                     refined_analogies[i]['visual'].update(vis_result)
+            
+            # Final list combines refined + evaluated-but-not-refined
+            # We use refined_analogies list as it contains both refined and high-scoring evaluated ones
+            final_analogies = refined_analogies
             
             # Calculate statistics
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
+            # Recalculate stats based on the final list
+            valid_eval_scores = [a.get("evaluation", {}).get("overall_score", 0) 
+                                 for a in final_analogies 
+                                 if isinstance(a.get("evaluation", {}).get("overall_score"), (int, float))]
+            average_score = sum(valid_eval_scores) / max(len(valid_eval_scores), 1) if valid_eval_scores else 0
+            
+            visual_assets_count = sum(len(a.get("visual", {}).get("assets", [])) 
+                                      for a in final_analogies if a.get("visual"))
+
             # Create result
             result = {
                 "concept": concept,
-                "generated_analogies": evaluated_analogies + refined_analogies,
+                "generated_analogies": final_analogies,
                 "existing_analogies": existing_analogies,
                 "stats": {
-                    "generated_count": len(evaluated_analogies) + len(refined_analogies),
+                    "generated_count": len(final_analogies),
                     "existing_count": len(existing_analogies),
-                    "visual_assets_count": sum(len(a.get("visual", {}).get("assets", [])) for a in evaluated_analogies + refined_analogies),
-                    "average_score": sum(a.get("evaluation", {}).get("overall_score", 0) for a in evaluated_analogies + refined_analogies) / max(len(evaluated_analogies + refined_analogies), 1),
+                    "visual_assets_count": visual_assets_count,
+                    "average_score": average_score,
                     "generation_duration_seconds": duration,
                     "timestamp": datetime.now().isoformat()
                 }

@@ -1,27 +1,47 @@
-pymongo==4.6.1
-pytest==7.4.0
-pytest-mock==3.11.1
-pytest-asyncio==0.23.5
-pytest-cov==4.1.0
-fastapi==0.104.1
-uvicorn==0.23.2
-python-dotenv==1.0.0
-langchain==0.0.335
-langchain_core>=0.1.17
-pyyaml==6.0.1
-openai==1.6.1
-pillow==10.1.0
-black==23.7.0
-isort==5.12.0
-flake8==6.1.0
-httpx==0.24.1
-asyncio>=3.4.3
-aiohttp>=3.8.6 
-python-dotenv==1.0.0
-pyyaml==6.0.1
-langchain-openai==0.0.1
-langchain-anthropic==0.0.1
-langchain-groq==0.0.1
+# Core Langchain and LLM provider packages
+langchain==0.3.25
+langchain-core==0.3.58
+langchain-openai==0.3.16
+langchain-groq==0.3.2
+langsmith==0.3.42
+openai==1.77.0
+
+# Utilities
+python-dotenv==1.1.0
+pydantic==2.11.4
+
+# Langchain Community / Addon Packages (from your environment)
+langchain-anthropic==0.3.12
+langchain-google-genai==2.1.4
 langchain-openrouter==0.0.1
-python-multipart==0.0.11
-jinja2>=3.0.0
+langchain-text-splitters==0.3.8
+langchain-xai==0.2.3
+langgraph==0.4.1
+langchain-community==0.3.23
+# Consider if you directly use and need to pin sub-dependencies of langgraph:
+# langgraph-checkpoint==2.0.25
+# langgraph-checkpoint-sqlite==2.0.6
+# langgraph-prebuilt==0.1.8
+# langgraph-sdk==0.1.66
+
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.26.0
+pytest-mock==3.11.1
+
+# Web Framework / HTTP / Async
+fastapi==0.115.12
+# uvicorn # Add version if needed, e.g., uvicorn==0.29.0
+httpx==0.27.2
+anyio==4.9.0
+
+# UI
+streamlit==1.45.0
+
+# Other common libraries seen in environment
+SQLAlchemy==2.0.40
+PyYAML==6.0.2
+rich==14.0.0
+tenacity==9.1.2
+
+# Add any other top-level packages your project specifically requires below

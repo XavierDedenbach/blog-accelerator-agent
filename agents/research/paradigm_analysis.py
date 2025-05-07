@@ -19,6 +19,7 @@ from langchain.chains.llm import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.chat_models import ChatOpenAI
 from langchain.schema.runnable import RunnableConfig
+from langchain_core.language_models.chat_models import BaseChatModel
 
 # Import Groq model dynamically to avoid import errors
 try:
@@ -57,46 +58,18 @@ class ParadigmAnalyzer:
     
     def __init__(
         self,
-        openai_api_key: Optional[str] = None,
-        groq_api_key: Optional[str] = None,
-        source_validator: Optional[SourceValidator] = None,
-        min_paradigms: int = 3
+        llm: BaseChatModel,
+        source_validator: SourceValidator
     ):
         """
         Initialize the paradigm analyzer.
         
         Args:
-            openai_api_key: OpenAI API key
-            groq_api_key: Groq API key
-            source_validator: SourceValidator instance
-            min_paradigms: Minimum number of paradigms to identify
+            llm: Language model instance.
+            source_validator: SourceValidator instance.
         """
-        self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
-        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY")
-        
-        # Try to use OpenAI first, fall back to Groq
-        if self.openai_api_key:
-            self.llm = ChatOpenAI(
-                model_name="gpt-4",
-                temperature=0.2,
-                openai_api_key=self.openai_api_key
-            )
-        elif self.groq_api_key:
-            self.llm = ChatGroq(
-                model_name="llama3-70b-8192",
-                temperature=0.2,
-                groq_api_key=self.groq_api_key
-            )
-        else:
-            raise ParadigmAnalysisError("No API key provided for LLM")
-        
-        # Initialize source validator if not provided
-        self.source_validator = source_validator or SourceValidator()
-        
-        # Set minimum paradigms threshold
-        self.min_paradigms = min_paradigms
-        
-        # Load prompts
+        self.initial_llm = llm
+        self.source_validator = source_validator
         self._init_prompts()
     
     def _init_prompts(self):
@@ -285,46 +258,51 @@ class ParadigmAnalyzer:
             """
         )
     
-    async def identify_historical_paradigms(self, topic: str) -> List[Dict[str, Any]]:
+    async def identify_historical_paradigms(
+        self,
+        topic: str,
+        llm_override: Optional[BaseChatModel] = None
+    ) -> List[Dict[str, Any]]:
         """
         Identify historical paradigms related to a topic, reflecting on core drivers first.
         
         Args:
             topic: Topic to analyze
+            llm_override: Optional language model override
             
         Returns:
             List of paradigm dictionaries
         """
+        logger.info(f"Identifying historical paradigms for topic: {topic} with core driver reflection...")
         try:
-            # Create chain for paradigm identification
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.identify_paradigms_prompt
             )
-            
-            # Run the chain
-            logger.info(f"Identifying historical paradigms for topic: {topic} with core driver reflection...")
-            response = await chain.arun(
-                topic=topic,
-                min_paradigms=self.min_paradigms
-            )
-            
-            # Parse JSON response
-            paradigms = json.loads(response)
-            
+            response = await chain.arun(topic=topic, min_paradigms=3)
+            paradigms = json.loads(response)["paradigms"]
             logger.info(f"Identified {len(paradigms)} historical paradigms for topic: {topic}")
             return paradigms
-            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error identifying paradigms for {topic}: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise ParadigmAnalysisError(f"Failed to parse paradigms JSON: {e}")
         except Exception as e:
             logger.error(f"Error identifying historical paradigms for {topic}: {e}")
             raise ParadigmAnalysisError(f"Failed to identify historical paradigms: {e}")
     
-    async def analyze_paradigm_transitions(self, paradigms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def analyze_paradigm_transitions(
+        self,
+        paradigms: List[Dict[str, Any]],
+        llm_override: Optional[BaseChatModel] = None
+    ) -> List[Dict[str, Any]]:
         """
         Analyze transitions between paradigms, reflecting on dynamics first.
         
         Args:
             paradigms: List of paradigm dictionaries
+            llm_override: Optional language model override
             
         Returns:
             List of transition dictionaries
@@ -333,26 +311,25 @@ class ParadigmAnalyzer:
             logger.info("Not enough paradigms to analyze transitions.")
             return []
         
+        logger.info(f"Analyzing transitions between {len(paradigms)} paradigms with dynamics reflection...")
         try:
-            # Format paradigms for prompt
-            paradigms_text = json.dumps(paradigms, indent=2)
-            
-            # Create chain for transition analysis
+            paradigms_text = "\n".join([
+                f"{i+1}. {p.get('name', '')}: {p.get('description', '')} (Drivers: {p.get('drivers', '')})"
+                for i, p in enumerate(paradigms)
+            ])
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.analyze_transitions_prompt
             )
-            
-            # Run the chain
-            logger.info(f"Analyzing transitions between {len(paradigms)} paradigms with dynamics reflection...")
             response = await chain.arun(paradigms=paradigms_text)
-            
-            # Parse JSON response
-            transitions = json.loads(response)
-            
+            transitions = json.loads(response)["transitions"]
             logger.info(f"Analyzed {len(transitions)} paradigm transitions.")
             return transitions
-            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error analyzing transitions: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise ParadigmAnalysisError(f"Failed to parse transitions JSON: {e}")
         except Exception as e:
             logger.error(f"Error analyzing paradigm transitions: {e}")
             raise ParadigmAnalysisError(f"Failed to analyze paradigm transitions: {e}")
@@ -360,7 +337,8 @@ class ParadigmAnalyzer:
     async def extract_historical_lessons(
         self,
         paradigms: List[Dict[str, Any]],
-        transitions: List[Dict[str, Any]]
+        transitions: List[Dict[str, Any]],
+        llm_override: Optional[BaseChatModel] = None
     ) -> List[Dict[str, Any]]:
         """
         Extract lessons from historical shifts, reflecting on patterns first.
@@ -368,34 +346,38 @@ class ParadigmAnalyzer:
         Args:
             paradigms: List of paradigm dictionaries
             transitions: List of transition dictionaries
+            llm_override: Optional language model override
             
         Returns:
             List of lesson dictionaries
         """
+        logger.info(f"Extracting historical lessons with pattern reflection...")
         try:
-            # Format paradigms and transitions for prompt
-            paradigms_text = json.dumps(paradigms, indent=2)
-            transitions_text = json.dumps(transitions, indent=2)
-            
-            # Create chain for lesson extraction
+            paradigms_text = "\n".join([
+                f"{i+1}. {p.get('name', '')}: {p.get('description', '')}"
+                for i, p in enumerate(paradigms)
+            ])
+            transitions_text = "\n".join([
+                f"{i+1}. From {t.get('from_paradigm', '')} to {t.get('to_paradigm', '')}: {t.get('analysis', '')}"
+                for i, t in enumerate(transitions)
+            ])
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.extract_lessons_prompt
             )
-            
-            # Run the chain
-            logger.info("Extracting historical lessons with pattern reflection...")
             response = await chain.arun(
                 paradigms=paradigms_text,
-                transitions=transitions_text
+                transitions=transitions_text,
+                min_lessons=3
             )
-            
-            # Parse JSON response
-            lessons = json.loads(response)
-            
+            lessons = json.loads(response)["lessons"]
             logger.info(f"Extracted {len(lessons)} historical lessons.")
             return lessons
-            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error extracting lessons: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise ParadigmAnalysisError(f"Failed to parse lessons JSON: {e}")
         except Exception as e:
             logger.error(f"Error extracting historical lessons: {e}")
             raise ParadigmAnalysisError(f"Failed to extract historical lessons: {e}")
@@ -403,51 +385,49 @@ class ParadigmAnalyzer:
     async def project_future_paradigms(
         self,
         topic: str,
-        paradigms: List[Dict[str, Any]],
-        transitions: List[Dict[str, Any]],
-        lessons: List[Dict[str, Any]]
+        historical_paradigms: List[Dict[str, Any]],
+        lessons: List[Dict[str, Any]],
+        llm_override: Optional[BaseChatModel] = None
     ) -> List[Dict[str, Any]]:
         """
         Project future paradigms, reflecting on current drivers first.
         
         Args:
             topic: Topic being analyzed
-            paradigms: List of historical paradigm dictionaries
-            transitions: List of transition dictionaries
+            historical_paradigms: List of historical paradigm dictionaries
             lessons: List of lesson dictionaries
+            llm_override: Optional language model override
             
         Returns:
             List of future paradigm projection dictionaries
         """
+        logger.info(f"Projecting future paradigms for {topic} with driver/disruptor reflection...")
         try:
-            # Format inputs for prompt
-            paradigms_text = json.dumps(paradigms, indent=2)
-            transitions_text = json.dumps(transitions, indent=2)
-            lessons_text = json.dumps(lessons, indent=2)
-            
-            # Create chain for future projection
+            paradigms_text = "\n".join([
+                f"{i+1}. {p.get('name', '')}: {p.get('description', '')}"
+                for i, p in enumerate(historical_paradigms)
+            ])
+            lessons_text = "\n".join([f"- {l['lesson']}" for l in lessons])
+            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.project_future_paradigms_prompt
             )
-            
-            # Run the chain
-            logger.info(f"Projecting future paradigms for {topic} with driver/disruptor reflection...")
             response = await chain.arun(
                 topic=topic,
-                paradigms=paradigms_text,
-                transitions=transitions_text,
-                lessons=lessons_text
+                historical_paradigms=paradigms_text,
+                lessons_learned=lessons_text,
+                min_future_paradigms=3
             )
-            
-            # Parse JSON response
-            future_paradigms = json.loads(response)
-            
+            future_paradigms = json.loads(response)["future_paradigms"]
             logger.info(f"Projected {len(future_paradigms)} future paradigms for {topic}.")
             return future_paradigms
-            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error projecting future paradigms: {e}")
+            logger.error(f"LLM Response was: {response}")
+            raise ParadigmAnalysisError(f"Failed to parse future paradigms JSON: {e}")
         except Exception as e:
-            logger.error(f"Error projecting future paradigms for {topic}: {e}")
+            logger.error(f"Error projecting future paradigms: {e}")
             raise ParadigmAnalysisError(f"Failed to project future paradigms: {e}")
     
     async def find_sources_for_paradigm(
@@ -500,12 +480,17 @@ class ParadigmAnalyzer:
         logger.info(f"Found {len(unique_sources)} sources for paradigm: {paradigm.get('name', '')}")
         return unique_sources
     
-    async def analyze_paradigms(self, topic: str) -> Dict[str, Any]:
+    async def analyze_paradigms(
+        self,
+        topic: str,
+        llm_override: Optional[BaseChatModel] = None
+    ) -> Dict[str, Any]:
         """
         Perform complete paradigm analysis for a topic.
         
         Args:
             topic: Topic to analyze
+            llm_override: Optional language model override
             
         Returns:
             Dictionary with paradigm analysis results
@@ -516,7 +501,7 @@ class ParadigmAnalyzer:
         try:
             # Identify historical paradigms
             logger.info(f"Identifying historical paradigms for topic: {topic}")
-            paradigms = await self.identify_historical_paradigms(topic)
+            paradigms = await self.identify_historical_paradigms(topic, llm_override=llm_override)
             
             # Ensure we have at least min_paradigms
             if len(paradigms) < self.min_paradigms:
@@ -541,15 +526,15 @@ class ParadigmAnalyzer:
             
             # Analyze transitions between paradigms
             logger.info(f"Analyzing transitions between paradigms")
-            transitions = await self.analyze_paradigm_transitions(paradigms)
+            transitions = await self.analyze_paradigm_transitions(paradigms, llm_override=llm_override)
             
             # Extract lessons from historical shifts
             logger.info(f"Extracting lessons from historical paradigm shifts")
-            lessons = await self.extract_historical_lessons(paradigms, transitions)
+            lessons = await self.extract_historical_lessons(paradigms, transitions, llm_override=llm_override)
             
             # Project future paradigms
             logger.info(f"Projecting future paradigm possibilities for {topic}")
-            future_paradigms = await self.project_future_paradigms(topic, paradigms, transitions, lessons)
+            future_paradigms = await self.project_future_paradigms(topic, enriched_paradigms, lessons, llm_override=llm_override)
             
             # Calculate statistics
             end_time = datetime.now()

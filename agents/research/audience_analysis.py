@@ -20,6 +20,7 @@ from langchain.chains.llm import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.chat_models import ChatOpenAI
 from langchain.schema.runnable import RunnableConfig
+from langchain_core.language_models.chat_models import BaseChatModel
 
 # Import Groq model dynamically to avoid import errors
 try:
@@ -97,51 +98,18 @@ class AudienceAnalyzer:
     
     def __init__(
         self,
-        openai_api_key: Optional[str] = None,
-        groq_api_key: Optional[str] = None,
-        source_validator: Optional[SourceValidator] = None,
-        min_segments: int = 3,
-        use_default_segments: bool = False
+        llm: BaseChatModel,
+        source_validator: SourceValidator
     ):
         """
-        Initialize the audience analyzer.
+        Initialize the Audience Analyzer.
         
         Args:
-            openai_api_key: OpenAI API key
-            groq_api_key: Groq API key
-            source_validator: SourceValidator instance
-            min_segments: Minimum number of audience segments to identify
-            use_default_segments: Whether to use default audience segments
+            llm: Language model instance.
+            source_validator: SourceValidator instance.
         """
-        self.openai_api_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
-        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY")
-        
-        # Try to use OpenAI first, fall back to Groq
-        if self.openai_api_key:
-            self.llm = ChatOpenAI(
-                model_name="gpt-4",
-                temperature=0.3,
-                openai_api_key=self.openai_api_key
-            )
-        elif self.groq_api_key:
-            self.llm = ChatGroq(
-                model_name="llama3-70b-8192",
-                temperature=0.3,
-                groq_api_key=self.groq_api_key
-            )
-        else:
-            raise AudienceAnalysisError("No API key provided for LLM")
-        
-        # Initialize source validator if not provided
-        self.source_validator = source_validator or SourceValidator()
-        
-        # Set minimum segments threshold
-        self.min_segments = min_segments
-        
-        # Set whether to use default segments
-        self.use_default_segments = use_default_segments
-        
-        # Load prompts
+        self.initial_llm = llm
+        self.source_validator = source_validator
         self._init_prompts()
     
     def _init_prompts(self):
@@ -335,23 +303,29 @@ class AudienceAnalyzer:
             """
         )
     
-    async def identify_audience_segments(self, topic: str) -> List[Dict[str, Any]]:
+    async def identify_segments(
+        self,
+        topic: str,
+        llm_override: Optional[BaseChatModel] = None
+    ) -> List[Dict[str, Any]]:
         """
         Identify target audience segments for a topic, reflecting on relevance first.
         
         Args:
             topic: Topic to analyze
+            llm_override: Optional language model override
             
         Returns:
             List of audience segment dictionaries
         """
         try:
+            current_llm = llm_override or self.initial_llm
             # Format existing segments for prompt
             existing_segments_text = json.dumps(self.DEFAULT_AUDIENCE_SEGMENTS, indent=2)
             
             # Create chain for segment identification
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.identify_segments_prompt
             )
             
@@ -359,12 +333,12 @@ class AudienceAnalyzer:
             logger.info(f"Identifying audience segments for topic: {topic} with relevance reflection...")
             response = await chain.arun(
                 topic=topic,
-                min_segments=self.min_segments,
+                min_segments=3,
                 existing_segments=existing_segments_text
             )
             
             # Parse JSON response
-            segments = json.loads(response)
+            segments = json.loads(response)["audience_segments"]
             
             logger.info(f"Identified {len(segments)} audience segments for topic: {topic}")
             return segments
@@ -376,7 +350,8 @@ class AudienceAnalyzer:
     async def analyze_segment_needs(
         self,
         segment: Dict[str, Any],
-        topic: str
+        topic: str,
+        llm_override: Optional[BaseChatModel] = None
     ) -> Dict[str, Any]:
         """
         Analyze the needs and pain points of a segment, reflecting on perspective first.
@@ -384,14 +359,16 @@ class AudienceAnalyzer:
         Args:
             segment: Audience segment dictionary
             topic: Topic being analyzed
+            llm_override: Optional language model override
             
         Returns:
             Dictionary with needs analysis (needs, questions, pain points, outcomes)
         """
         try:
+            current_llm = llm_override or self.initial_llm
             # Create chain for needs analysis
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.analyze_needs_prompt
             )
             
@@ -418,7 +395,8 @@ class AudienceAnalyzer:
     async def evaluate_segment_knowledge(
         self,
         segment: Dict[str, Any],
-        topic: str
+        topic: str,
+        llm_override: Optional[BaseChatModel] = None
     ) -> Dict[str, Any]:
         """
         Evaluate the knowledge level of a segment, reflecting on background first.
@@ -426,14 +404,16 @@ class AudienceAnalyzer:
         Args:
             segment: Audience segment dictionary
             topic: Topic being analyzed
+            llm_override: Optional language model override
             
         Returns:
             Dictionary with knowledge evaluation (assumed, gaps, misconceptions, depth)
         """
         try:
+            current_llm = llm_override or self.initial_llm
             # Create chain for knowledge evaluation
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.evaluate_knowledge_prompt
             )
             
@@ -462,7 +442,8 @@ class AudienceAnalyzer:
         segment: Dict[str, Any],
         topic: str,
         needs: Dict[str, Any],
-        knowledge: Dict[str, Any]
+        knowledge: Dict[str, Any],
+        llm_override: Optional[BaseChatModel] = None
     ) -> List[Dict[str, Any]]:
         """
         Recommend content strategies for a segment, reflecting on bridging gaps first.
@@ -472,18 +453,20 @@ class AudienceAnalyzer:
             topic: Topic being analyzed
             needs: Needs analysis dictionary
             knowledge: Knowledge evaluation dictionary
+            llm_override: Optional language model override
             
         Returns:
             List of recommended content strategy dictionaries
         """
         try:
+            current_llm = llm_override or self.initial_llm
             # Format needs and knowledge for prompt
             needs_text = json.dumps(needs, indent=2)
             knowledge_text = json.dumps(knowledge, indent=2)
             
             # Create chain for strategy recommendation
             chain = LLMChain(
-                llm=self.llm,
+                llm=current_llm,
                 prompt=self.recommend_strategies_prompt
             )
             
@@ -640,12 +623,17 @@ class AudienceAnalyzer:
         logger.info(f"Found {len(unique_sources)} sources for audience segment: {segment.get('name', '')}")
         return unique_sources
     
-    async def analyze_audience(self, topic: str) -> Dict[str, Any]:
+    async def analyze_audience(
+        self,
+        topic: str,
+        llm_override: Optional[BaseChatModel] = None
+    ) -> Dict[str, Any]:
         """
         Perform complete audience analysis for a topic.
         
         Args:
             topic: Topic to analyze
+            llm_override: Optional language model override
             
         Returns:
             Dictionary with audience analysis results
@@ -655,14 +643,14 @@ class AudienceAnalyzer:
         
         try:
             # Identify audience segments
-            # Logger message moved to identify_audience_segments
-            segments = await self.identify_audience_segments(topic)
+            # Logger message moved to identify_segments
+            segments = await self.identify_segments(topic, llm_override=llm_override)
             
             # Ensure we have at least min_segments
-            if len(segments) < self.min_segments:
+            if len(segments) < 3:
                 logger.warning(
                     f"Only identified {len(segments)} audience segments, " 
-                    f"which is less than minimum {self.min_segments}"
+                    f"which is less than minimum 3"
                 )
             
             # Process each segment
@@ -675,15 +663,15 @@ class AudienceAnalyzer:
                 
                 # Analyze needs
                 # Logger message moved to analyze_segment_needs
-                needs = await self.analyze_segment_needs(segment, topic)
+                needs = await self.analyze_segment_needs(segment, topic, llm_override=llm_override)
                 
                 # Evaluate knowledge
                 # Logger message moved to evaluate_segment_knowledge
-                knowledge = await self.evaluate_segment_knowledge(segment, topic)
+                knowledge = await self.evaluate_segment_knowledge(segment, topic, llm_override=llm_override)
                 
                 # Recommend strategies
                 # Logger message moved to recommend_content_strategies
-                strategies = await self.recommend_content_strategies(segment, topic, needs, knowledge)
+                strategies = await self.recommend_content_strategies(segment, topic, needs, knowledge, llm_override=llm_override)
                 
                 # Add to enriched segments
                 enriched_segment = {

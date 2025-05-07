@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 from collections import deque
 import asyncio
 import httpx
+import inspect
 
 # Configure logging
 logging.basicConfig(
@@ -517,7 +518,12 @@ class SourceValidator:
                 # Process results
                 results = []
                 try:
-                    data = await response.json() # Await the JSON parsing
+                    json_result = response.json() # Call json() first
+                    if inspect.isawaitable(json_result): # Check if it's awaitable
+                        data = await json_result
+                    else:
+                        data = json_result # Use directly if it's already a dict
+                        
                     web_results = data.get('web', {}).get('results', [])
                 except ValueError as e:
                     logger.error(f"Error parsing JSON response: {e} - Response text: {response.text}") # Log response text
