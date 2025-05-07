@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
+import re # Import re for regex
 
 from langchain.callbacks.manager import CallbackManagerForChainRun
 from langchain.chains.llm import LLMChain
@@ -217,6 +218,8 @@ Only respond with the JSON array.
     async def generate_pro_arguments(
         self,
         solution_title: str,
+        topic: str,
+        challenges: List[str],
         llm_override: Optional[BaseChatModel] = None
     ) -> List[str]:
         """Generate pro arguments for the proposed solution."""
@@ -227,13 +230,14 @@ Only respond with the JSON array.
                 llm=current_llm,
                 prompt=self.pro_arguments_prompt
             )
-            response = await chain.arun(solution=solution_title, min_arguments=5)
-            arguments = json.loads(response)["arguments"]
+            # Pass topic and challenges to the LLM chain
+            response = await chain.arun(solution=solution_title, topic=topic, challenges="\n".join(challenges), min_arguments=5)
+            arguments = self._parse_llm_response_to_json(response, f"pro arguments for {solution_title}")
             logger.info(f"Generated {len(arguments)} pro arguments for solution: {solution_title}")
             return arguments
         except json.JSONDecodeError as e:
             logger.error(f"JSON Parsing Error generating pro arguments for {solution_title}: {e}")
-            logger.error(f"LLM Response was: {response}")
+            logger.error(f"LLM Response was: {response if 'response' in locals() else 'Response text not captured'}")
             raise SolutionAnalysisError(f"Failed to parse pro arguments JSON: {e}")
         except Exception as e:
             logger.error(f"Error generating pro arguments for {solution_title}: {e}")
@@ -242,6 +246,8 @@ Only respond with the JSON array.
     async def generate_counter_arguments(
         self,
         solution_title: str,
+        topic: str,
+        challenges: List[str],
         llm_override: Optional[BaseChatModel] = None
     ) -> List[str]:
         """Generate counter arguments against the proposed solution."""
@@ -252,13 +258,14 @@ Only respond with the JSON array.
                 llm=current_llm,
                 prompt=self.counter_arguments_prompt
             )
-            response = await chain.arun(solution=solution_title, min_arguments=5)
-            arguments = json.loads(response)["arguments"]
+            # Pass topic and challenges to the LLM chain
+            response = await chain.arun(solution=solution_title, topic=topic, challenges="\n".join(challenges), min_arguments=5)
+            arguments = self._parse_llm_response_to_json(response, f"counter arguments for {solution_title}")
             logger.info(f"Generated {len(arguments)} counter arguments for solution: {solution_title}")
             return arguments
         except json.JSONDecodeError as e:
             logger.error(f"JSON Parsing Error generating counter arguments for {solution_title}: {e}")
-            logger.error(f"LLM Response was: {response}")
+            logger.error(f"LLM Response was: {response if 'response' in locals() else 'Response text not captured'}")
             raise SolutionAnalysisError(f"Failed to parse counter arguments JSON: {e}")
         except Exception as e:
             logger.error(f"Error generating counter arguments for {solution_title}: {e}")
@@ -267,9 +274,11 @@ Only respond with the JSON array.
     async def identify_metrics(
         self,
         solution_title: str,
+        topic: str,
+        challenges: List[str],
         llm_override: Optional[BaseChatModel] = None
     ) -> List[Dict[str, str]]:
-        """Identify key metrics to measure the solution's success."""
+        """Identify key metrics for the proposed solution."""
         logger.info(f"Identifying metrics for solution: {solution_title} with context reflection...")
         try:
             current_llm = llm_override or self.initial_llm
@@ -277,13 +286,16 @@ Only respond with the JSON array.
                 llm=current_llm,
                 prompt=self.identify_metrics_prompt
             )
-            response = await chain.arun(solution=solution_title, min_metrics=5)
-            metrics = json.loads(response)["metrics"]
+            # Pass topic and challenges to the LLM chain
+            # The prompt for identify_metrics expects 'topic', 'solution', and 'challenges'.
+            # 'min_metrics' is not a direct input to this prompt based on its definition but is handled by the prompt's instruction to aim for 5-10 metrics.
+            response = await chain.arun(solution=solution_title, topic=topic, challenges="\n".join(challenges))
+            metrics = self._parse_llm_response_to_json(response, f"metrics for {solution_title}")
             logger.info(f"Identified {len(metrics)} metrics for solution: {solution_title}")
             return metrics
         except json.JSONDecodeError as e:
             logger.error(f"JSON Parsing Error identifying metrics for {solution_title}: {e}")
-            logger.error(f"LLM Response was: {response}")
+            logger.error(f"LLM Response was: {response if 'response' in locals() else 'Response text not captured'}")
             raise SolutionAnalysisError(f"Failed to parse metrics JSON: {e}")
         except Exception as e:
             logger.error(f"Error identifying metrics for {solution_title}: {e}")
@@ -333,69 +345,157 @@ Only respond with the JSON array.
     
     async def analyze_solution(
         self,
-        solution_title: str = "Proposed Solution",
+        solution_title: str,
+        topic: str,
+        challenges: List[str],
         llm_override: Optional[BaseChatModel] = None
     ) -> Dict[str, Any]:
-        """Perform full analysis for a given solution."""
-        start_time = datetime.now()
-        logger.info(f"Starting solution analysis for: {solution_title}")
+        """
+        Analyze the solution by generating pro/counter arguments and metrics.
+        Also finds sources for arguments.
+
+        Args:
+            solution_title: The title of the solution to analyze.
+            topic: The broader topic or domain of the solution.
+            challenges: A list of challenges the solution aims to address.
+            llm_override: Optional language model to override the default.
+
+        Returns:
+            A dictionary containing the analysis results, including title, args, metrics, and stats.
+        """
+        logger.info(f"Starting full solution analysis for: {solution_title} within topic: {topic}")
+        start_time = datetime.now() # For stats
+        pro_arguments_list = []
+        counter_arguments_list = []
+        metrics_list = []
+        errors = []
 
         try:
-            # Generate arguments
-            pro_arguments_list = await self.generate_pro_arguments(solution_title, llm_override=llm_override)
-            counter_arguments_list = await self.generate_counter_arguments(solution_title, llm_override=llm_override)
-            metrics_list = await self.identify_metrics(solution_title, llm_override=llm_override)
-
-            # Find sources for arguments
-            pro_arguments = []
-            total_pro_sources = 0
-            for arg in pro_arguments_list:
-                try:
-                    logger.info(f"Finding sources for pro argument: {arg}")
-                    sources = await self.find_argument_sources(arg, solution_title, is_pro_argument=True)
-                    pro_arguments.append({"argument": arg, "sources": sources})
-                    total_pro_sources += len(sources)
-                except Exception as e:
-                    logger.error(f"Error finding sources for pro argument '{arg}': {e}")
-                    pro_arguments.append({"argument": arg, "sources": [], "error": str(e)})
-
-            counter_arguments = []
-            total_con_sources = 0
-            for arg in counter_arguments_list:
-                try:
-                    logger.info(f"Finding sources for counter argument: {arg}")
-                    sources = await self.find_argument_sources(arg, solution_title, is_pro_argument=False)
-                    counter_arguments.append({"argument": arg, "sources": sources})
-                    total_con_sources += len(sources)
-                except Exception as e:
-                    logger.error(f"Error finding sources for counter argument '{arg}': {e}")
-                    counter_arguments.append({"argument": arg, "sources": [], "error": str(e)})
-
-            end_time = datetime.now()
-            duration = (end_time - start_time).total_seconds()
-
-            result = {
-                "solution_title": solution_title,
-                "pro_arguments": pro_arguments,
-                "counter_arguments": counter_arguments,
-                "metrics": metrics_list,
-                "stats": {
-                    "pro_args_count": len(pro_arguments),
-                    "counter_args_count": len(counter_arguments),
-                    "metrics_count": len(metrics_list),
-                    "total_pro_sources": total_pro_sources,
-                    "total_con_sources": total_con_sources,
-                    "analysis_duration_seconds": duration,
-                    "timestamp": datetime.now().isoformat()
-                }
-            }
-
-            logger.info(
-                f"Completed solution analysis for {solution_title} with "
-                f"{len(pro_arguments)} pro arguments, {len(counter_arguments)} counter arguments, and {len(metrics_list)} metrics"
+            pro_arguments_list = await self.generate_pro_arguments(
+                solution_title=solution_title, 
+                topic=topic, 
+                challenges=challenges, 
+                llm_override=llm_override
             )
-            return result
+        except SolutionAnalysisError as e:
+            logger.error(f"Error generating pro arguments in full analysis: {e}")
+            errors.append(f"Pro arguments generation failed: {e}")
+        
+        try:
+            counter_arguments_list = await self.generate_counter_arguments(
+                solution_title=solution_title, 
+                topic=topic, 
+                challenges=challenges, 
+                llm_override=llm_override
+            )
+        except SolutionAnalysisError as e:
+            logger.error(f"Error generating counter arguments in full analysis: {e}")
+            errors.append(f"Counter arguments generation failed: {e}")
+        
+        try:
+            metrics_list = await self.identify_metrics(
+                solution_title=solution_title, 
+                topic=topic, 
+                challenges=challenges, 
+                llm_override=llm_override
+            )
+        except SolutionAnalysisError as e:
+            logger.error(f"Error identifying metrics in full analysis: {e}")
+            errors.append(f"Metrics identification failed: {e}")
 
-        except Exception as e:
-            logger.error(f"Error in solution analysis for {solution_title}: {e}")
-            raise SolutionAnalysisError(f"Failed to complete solution analysis: {e}") 
+        # Process pro arguments for sources
+        processed_pro_arguments = []
+        total_pro_sources = 0
+        for arg_data in pro_arguments_list: # Use the list fetched, not from a temp results dict
+            if isinstance(arg_data, dict) and "name" in arg_data and "search_terms" in arg_data:
+                try:
+                    sources = await self.find_argument_sources(
+                        argument=arg_data, 
+                        solution_title=solution_title, 
+                        is_pro_argument=True
+                    )
+                    arg_data["sources"] = sources
+                    total_pro_sources += len(sources)
+                except SolutionAnalysisError as e:
+                    logger.error(f"Error finding sources for pro argument '{arg_data.get('name', 'Unknown')}': {e}")
+                    arg_data["sources"] = [] 
+                    errors.append(f"Source finding for pro arg '{arg_data.get('name', 'Unknown')}' failed: {e}")
+                processed_pro_arguments.append(arg_data)
+            else:
+                logger.warning(f"Skipping source finding for malformed pro argument: {arg_data}")
+                processed_pro_arguments.append(arg_data) # Still add it, maybe without sources
+
+        # Process counter arguments for sources
+        processed_counter_arguments = []
+        total_con_sources = 0
+        for arg_data in counter_arguments_list: # Use the list fetched
+            if isinstance(arg_data, dict) and "name" in arg_data and "search_terms" in arg_data:
+                try:
+                    sources = await self.find_argument_sources(
+                        argument=arg_data, 
+                        solution_title=solution_title, 
+                        is_pro_argument=False
+                    )
+                    arg_data["sources"] = sources
+                    total_con_sources += len(sources)
+                except SolutionAnalysisError as e:
+                    logger.error(f"Error finding sources for counter argument '{arg_data.get('name', 'Unknown')}': {e}")
+                    arg_data["sources"] = []
+                    errors.append(f"Source finding for counter arg '{arg_data.get('name', 'Unknown')}' failed: {e}")
+                processed_counter_arguments.append(arg_data)
+            else:
+                logger.warning(f"Skipping source finding for malformed counter argument: {arg_data}")
+                processed_counter_arguments.append(arg_data)
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+
+        final_result = {
+            "solution_title": solution_title,
+            "topic": topic, # Include topic in results
+            "challenges": challenges, # Include challenges in results
+            "pro_arguments": processed_pro_arguments,
+            "counter_arguments": processed_counter_arguments,
+            "metrics": metrics_list,
+            "errors": errors,
+            "stats": {
+                "pro_args_count": len(processed_pro_arguments),
+                "counter_args_count": len(processed_counter_arguments),
+                "metrics_count": len(metrics_list),
+                "total_pro_sources": total_pro_sources,
+                "total_con_sources": total_con_sources,
+                "error_count": len(errors),
+                "analysis_duration_seconds": duration,
+                "timestamp": datetime.now().isoformat(),
+                "total_stages": 3
+            }
+        }
+
+        if errors:
+            logger.warning(f"Completed solution analysis for {solution_title} with {len(errors)} errors.")
+        else:
+            logger.info(f"Successfully completed solution analysis for {solution_title}.")
+        
+        return final_result 
+
+    def _parse_llm_response_to_json(self, response_text: str, context: str) -> Any:
+        """Helper to parse LLM JSON response, with error handling and logging."""
+        # Attempt to extract JSON from markdown code block using regex
+        match = re.match(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", response_text, re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            json_str = match.group(1).strip()
+        else:
+            # If no markdown fence pattern is matched, assume the response_text is the JSON string itself (or already cleaned)
+            json_str = response_text.strip()
+
+        # ADDED: Debug log to see exactly what is being parsed
+        logger.debug(f"Attempting to parse JSON (first 1000 chars): '{json_str[:1000]}'")
+
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON Parsing Error {context}: {e}")
+            logger.error(f"LLM Response (after attempted cleaning) was: {json_str}")
+            logger.error(f"Original LLM Response was: {response_text}")
+            raise SolutionAnalysisError(f"Failed to parse {context} JSON: {e}") from e 
