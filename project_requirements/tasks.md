@@ -169,6 +169,79 @@ blog-accelerator-agent/
 * **Integration Points**: Update `run_researcher_with_env.py` to launch browser, add new endpoint to API server
 
 ---
+### Task 12: Update Testing for Paradigm Analysis Module
+
+**Objective:** Enhance the testing suite for the `paradigm_analysis` module to match the robustness and structure of the `industry_analysis` tests.
+
+**Details:**
+- Review `tests/agents/research/test_industry_analysis.py` and the `agents/research/industry_analysis.py` module to understand the current testing standards, including unit tests, integration tests, mocking strategies, and API key handling for integration tests.
+- Implement similar comprehensive tests for the `paradigm_analysis` module and its corresponding test file (e.g., `tests/agents/research/test_paradigm_analysis.py`).
+- **Key Focus Areas:**
+    - Ensure proper mocking of LLM calls and external services (like `SourceValidator` if used) for unit tests. Refer to fixtures like `mock_llm`, `mock_source_validator`, and `industry_analyzer` in `test_industry_analysis.py` and the `mock_json_parser_parse_result_side_effect` for handling LLM outputs.
+    - Implement an integration test that uses real API calls (similar to `test_analyze_industry_integration_real_llm`).
+    - Address potential API key loading issues by referring to the `conftest.py` setup (`load_env_vars_and_debug` fixture for loading `.env` and the non-autouse `mock_env_variables` fixture for unit test isolation). Ensure integration tests correctly use real keys and unit tests use mocks or placeholders.
+    - Ensure test cleanup, clear commenting, and robust error handling in tests.
+- **Reference Files:**
+    - `tests/agents/research/test_industry_analysis.py`
+    - `agents/research/industry_analysis.py`
+    - `tests/conftest.py` (for fixture patterns)
+- **Goal:** Achieve a similar level of test coverage and reliability as demonstrated in the `industry_analysis` module.
+
+---
+### Task 13: Update Testing for Solution Analysis Module
+
+**Objective:** Enhance the testing suite for the `solution_analysis` module, aligning with the standards set by `industry_analysis`.
+
+**Details:**
+- Review `tests/agents/research/test_industry_analysis.py` and `agents/research/industry_analysis.py` for best practices in testing structure, mocking, and integration test design.
+- Apply these practices to the `solution_analysis` module and its test file.
+- **Key Focus Areas:**
+    - Implement comprehensive unit tests with effective mocking of LLMs and any external services. See `test_industry_analysis.py` for examples of `AsyncMock`, `MagicMock`, `patch`, and custom side effect functions for parsers.
+    - Develop an integration test that interacts with live APIs, ensuring correct API key management as resolved for `test_analyze_industry_integration_real_llm`. Consult `tests/conftest.py` for the `load_env_vars_and_debug` and `mock_env_variables` fixture patterns.
+    - Ensure tests are well-commented and debug prints (if any were used during development) are cleaned up or commented out.
+- **Reference Files:**
+    - `tests/agents/research/test_industry_analysis.py`
+    - `agents/research/industry_analysis.py`
+    - `tests/conftest.py`
+- **Goal:** Elevate the `solution_analysis` tests to mirror the quality and thoroughness of the `industry_analysis` tests.
+
+---
+### Task 14: Update Testing for Analogy Generator Module
+
+**Objective:** Refactor and improve the tests for the `analogy_generator` module based on the `industry_analysis` testing model.
+
+**Details:**
+- Study the testing approach in `tests/agents/research/test_industry_analysis.py` and the structure of `agents/research/industry_analysis.py`.
+- Update the `analogy_generator` tests to incorporate similar unit and integration testing strategies.
+- **Key Focus Areas:**
+    - For unit tests: Ensure robust mocking of LLM interactions. The use of `AsyncMock` with custom `side_effect` functions to simulate various LLM responses (including error cases and malformed JSON) in `test_industry_analysis.py` is a good reference.
+    - For integration tests: Create tests that make real API calls. Pay close attention to the API key loading mechanism (`load_env_vars_and_debug` in `conftest.py`) and how placeholder keys are managed for unit tests (`mock_env_variables` fixture).
+    - Add clear comments and docstrings to tests.
+- **Reference Files:**
+    - `tests/agents/research/test_industry_analysis.py`
+    - `agents/research/industry_analysis.py`
+    - `tests/conftest.py`
+- **Goal:** Ensure the `analogy_generator` module has a comprehensive and reliable test suite.
+
+---
+### Task 15: Update Testing for Audience Analysis Module
+
+**Objective:** Modernize the testing for the `audience_analysis` module, using `industry_analysis` as a template for comprehensive testing.
+
+**Details:**
+- Analyze the testing patterns in `tests/agents/research/test_industry_analysis.py` and the corresponding module `agents/research/industry_analysis.py`.
+- Revamp the tests for `audience_analysis` to include thorough unit and integration tests.
+- **Key Focus Areas:**
+    - Unit tests should feature detailed mocking of LLM responses, covering successful outputs, errors, and edge cases. The `mock_json_parser_parse_result_side_effect` in `test_industry_analysis.py` is a useful pattern for testing JSON parsing from LLM outputs.
+    - Integration tests should connect to real APIs, with careful management of API keys. The solution involving `load_env_vars_and_debug` (autouse session fixture for `.env`) and `mock_env_variables` (non-autouse session fixture for mock values) in `tests/conftest.py` should be replicated.
+    - Ensure high readability of test code through comments and clear structure.
+- **Reference Files:**
+    - `tests/agents/research/test_industry_analysis.py`
+    - `agents/research/industry_analysis.py`
+    - `tests/conftest.py`
+- **Goal:** Bring the `audience_analysis` test suite up to the same high standard as `industry_analysis`.
+
+---
 
 ## 📝 Future Reviewer Agent Tasks (For Later)
 
