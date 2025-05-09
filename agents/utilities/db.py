@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional, Union
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 from datetime import datetime, timezone
+from pymongo.database import Database
 
 
 class MongoDBClient:
@@ -388,3 +389,8 @@ class MongoDBClient:
             }}
         )
         return result.modified_count > 0
+
+def get_db_client() -> Database:
+    """Helper function to get a MongoDB database client."""
+    client = MongoDBClient()
+    return client.db
