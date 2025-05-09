@@ -168,7 +168,6 @@ blog-accelerator-agent/
 * **Expected Output**: Browser tab automatically opens with formatted research report after processing completes
 * **Integration Points**: Update `run_researcher_with_env.py` to launch browser, add new endpoint to API server
 
----
 ### Task 12: Update Testing for Paradigm Analysis Module
 
 **Objective:** Enhance the testing suite for the `paradigm_analysis` module to match the robustness and structure of the `industry_analysis` tests.
@@ -187,7 +186,6 @@ blog-accelerator-agent/
     - `tests/conftest.py` (for fixture patterns)
 - **Goal:** Achieve a similar level of test coverage and reliability as demonstrated in the `industry_analysis` module.
 
----
 ### Task 13: Update Testing for Solution Analysis Module
 
 **Objective:** Enhance the testing suite for the `solution_analysis` module, aligning with the standards set by `industry_analysis`.
@@ -205,7 +203,6 @@ blog-accelerator-agent/
     - `tests/conftest.py`
 - **Goal:** Elevate the `solution_analysis` tests to mirror the quality and thoroughness of the `industry_analysis` tests.
 
----
 ### Task 14: Update Testing for Analogy Generator Module
 
 **Objective:** Refactor and improve the tests for the `analogy_generator` module based on the `industry_analysis` testing model.
@@ -223,7 +220,6 @@ blog-accelerator-agent/
     - `tests/conftest.py`
 - **Goal:** Ensure the `analogy_generator` module has a comprehensive and reliable test suite.
 
----
 ### Task 15: Update Testing for Audience Analysis Module
 
 **Objective:** Modernize the testing for the `audience_analysis` module, using `industry_analysis` as a template for comprehensive testing.
@@ -240,6 +236,41 @@ blog-accelerator-agent/
     - `agents/research/industry_analysis.py`
     - `tests/conftest.py`
 - **Goal:** Bring the `audience_analysis` test suite up to the same high standard as `industry_analysis`.
+
+### Task 16: Debug and Fix Researcher Agent Failures (Solution, Audience, Paradigm Analyzers)
+
+**Objective:** Resolve runtime errors in the `ResearcherAgent` related to `SolutionAnalyzer` argument passing, JSON parsing failures in `AudienceAnalyzer` and `ParadigmAnalyzer`, and orchestrate dependent tasks.
+
+**Details:**
+- **Issue 1: `SolutionAnalyzer` Missing Arguments & Task Orchestration**
+    - **File:** `agents/researcher_agent.py`
+    - **Problem:** `TypeError` due to `analyze_solution` being called without `topic` and `challenges`. Also, `ParadigmAnalyzer` needs context from `IndustryAnalyzer`.
+    - **Fix:** Modify the `gather_research` method in `ResearcherAgent`:
+        1. Run `industry_analyzer.analyze_industry` first and await its completion.
+        2. Extract `challenges` (list of names) and the full `industry_context` from the industry analysis results.
+        3. Pass the `topic` and extracted `challenges` list to `solution_analyzer.analyze_solution`.
+        4. Pass the `topic` and full `industry_context` to `paradigm_analyzer.analyze_paradigms`.
+        5. Run `solution_analyzer`, `paradigm_analyzer`, and other independent LLM tasks (audience, analogy) concurrently after industry analysis is complete.
+        6. Ensure `visual_asset_collector.collect_visuals` runs last, using results from the preceding dependent tasks.
+
+- **Issue 2: JSON Parsing Errors in `AudienceAnalyzer` & `ParadigmAnalyzer` (and ensure for `SolutionAnalyzer`)**
+    - **Files:** `agents/research/audience_analysis.py`, `agents/research/paradigm_analysis.py`, `agents/research/solution_analysis.py`
+    - **Problem:** `json.JSONDecodeError` because LLM responses include non-JSON text (e.g., `<think>` blocks or are not purely JSON).
+    - **Fix:**
+        1. Implement a robust `_parse_llm_response_to_json(self, response_text: str, context: str) -> Any` helper method in `AudienceAnalyzer`, `ParadigmAnalyzer`, and verify/enhance in `SolutionAnalyzer`.
+        2. This method should use regex to:
+            a. Prioritize extracting content from ```json ... ``` markdown blocks.
+            b. If no markdown block, attempt to strip common leading/trailing non-JSON text (e.g., `<think>...</think>` blocks).
+            c. Log extensively for debugging.
+        3. Replace all direct `json.loads()` calls on raw LLM responses in these analyzers with calls to this new helper method.
+        4. Ensure appropriate error handling (e.g., raising analyzer-specific exceptions) if parsing still fails.
+        5. For `ParadigmAnalyzer`, update `identify_paradigms_prompt` and relevant methods to accept and use `industry_context`.
+
+**Reference Log Snippets:**
+- SolutionAnalyzer: `TypeError: SolutionAnalyzer.analyze_solution() missing 2 required positional arguments: 'topic' and 'challenges'`
+- AudienceAnalyzer/ParadigmAnalyzer: `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)`
+
+**Goal:** Ensure the `ResearcherAgent` can complete its analysis runs without TypeErrors or JSON parsing errors, with improved contextual data flow between analyzers, leading to more stable and reliable research generation.
 
 ---
 

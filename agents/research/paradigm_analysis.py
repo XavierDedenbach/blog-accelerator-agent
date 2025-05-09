@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
+import re
 
 from langchain.prompts import PromptTemplate
 from langchain.chains.llm import LLMChain
@@ -73,12 +74,20 @@ class ParadigmAnalyzer:
         self.source_validator = source_validator
         self.min_paradigms = 3  # ADDED: Default minimum paradigms for identification
         self._init_prompts()
+        # Added: Pre-compile regex patterns for efficiency
+        self.json_md_block_pattern = re.compile(r"```(?:json)?\\s*(.*?)\\s*```", re.DOTALL | re.IGNORECASE)
+        self.think_block_pattern = re.compile(r"^\\s*<think>.*?</think>\\s*", re.DOTALL | re.IGNORECASE)
     
     def _init_prompts(self):
         """Initialize prompts for paradigm analysis."""
         self.identify_paradigms_prompt = PromptTemplate(
-            input_variables=["topic", "min_paradigms"],
+            input_variables=["topic", "min_paradigms", "industry_context"],
             template="""You are analyzing the historical paradigms related to the topic: {topic}.
+
+            Industry Context (from previous analysis):
+            {industry_context}
+
+            Use this industry context to inform your identification of historical paradigms, ensuring they are relevant to the analyzed industry challenges and characteristics.
 
             **Step 1: Identify Core Constraints**
             Begin by considering the fundamental technological, economic, social, or scientific constraints that have shaped the evolution of '{topic}' over time. What hard limitations or boundaries have defined different eras?
@@ -260,9 +269,72 @@ class ParadigmAnalyzer:
             """
         )
     
+    def _parse_llm_response_to_json(self, response_text: str, context: str) -> Any:
+        """Helper to parse LLM JSON response, stripping markdown and handling errors."""
+        logger.debug(f"Original LLM response for {context} (length {len(response_text)}): {response_text[:500]}...")
+        json_str = None
+
+        # 1. Try to find a JSON markdown block and extract its content
+        md_match = self.json_md_block_pattern.search(response_text)
+        if md_match:
+            json_str = md_match.group(1).strip()
+            logger.debug(f"Extracted from JSON markdown block for {context}: {json_str[:500]}...")
+        else:
+            # 2. If no markdown block, try to strip common non-JSON prefixes/suffixes
+            # Remove <think> blocks first
+            temp_str = self.think_block_pattern.sub("", response_text).strip()
+            
+            # Attempt to find the start and end of a JSON object/array
+            json_start_chars = ['{', '[']
+            json_end_chars = ['}', ']']
+            
+            start_index = -1
+            end_index = -1
+
+            for char_index, char_val in enumerate(temp_str):
+                if char_val in json_start_chars:
+                    start_index = char_index
+                    break
+            
+            if start_index != -1:
+                looking_for = '}' if temp_str[start_index] == '{' else ']'
+                for char_index in range(len(temp_str) - 1, start_index, -1):
+                    if temp_str[char_index] == looking_for:
+                        end_index = char_index
+                        break
+                
+                if end_index != -1:
+                    json_str = temp_str[start_index : end_index+1]
+                    logger.debug(f"Extracted by finding start/end chars for {context}: {json_str[:500]}...")
+                else:
+                    logger.warning(f"Found JSON start but no clear end for {context}. Trying with stripped <think> text.")
+                    json_str = temp_str
+            else:
+                # 3. Fallback: assume the whole original response (stripped) was intended to be JSON
+                logger.warning(f"No JSON markdown block or clear JSON start found for {context}. Using stripped original response as a last resort.")
+                json_str = response_text.strip()
+
+        if not json_str:
+            error_message = f"Could not extract any potential JSON string for {context}. Original response (first 300): '{response_text[:300]}'."
+            logger.error(error_message)
+            raise ParadigmAnalysisError(error_message)
+
+        logger.debug(f"Attempting to parse extracted JSON string for {context} (length {len(json_str)}): {json_str[:500]}...")
+        try:
+            cleaned_json_str = re.sub(r",(\s*[}\]])", r"\1", json_str) # remove trailing commas
+            if cleaned_json_str != json_str:
+                logger.debug(f"Removed trailing commas. New string: {cleaned_json_str[:500]}...")
+            
+            return json.loads(cleaned_json_str)
+        except json.JSONDecodeError as e:
+            error_message = f"JSON Parsing Error for {context}: {e}. Problematic text around char {e.pos} (showing 30 chars before and after): '...{json_str[max(0, e.pos-30):e.pos+30]}...'. Extracted string was (first 500): '{json_str[:500]}'. Original response (first 500): '{response_text[:500]}'."
+            logger.error(error_message)
+            raise ParadigmAnalysisError(error_message) from e
+
     async def identify_historical_paradigms(
         self,
         topic: str,
+        industry_context: Optional[Dict[str, Any]] = None,
         llm_override: Optional[BaseChatModel] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -270,20 +342,37 @@ class ParadigmAnalyzer:
         
         Args:
             topic: Topic to analyze
+            industry_context: Optional industry context data
             llm_override: Optional language model override
             
         Returns:
             List of paradigm dictionaries
         """
         logger.info(f"Identifying historical paradigms for topic: {topic} with core driver reflection...")
+        current_llm = llm_override or self.initial_llm
+        industry_context_str = json.dumps(industry_context, indent=2) if industry_context else "No specific industry context provided."
+
+        # Check if the current LLM is Groq and truncate industry_context_str if it's too long
+        # The error showed a request of ~28k tokens when Groq limit is 6k.
+        # Let's aim for a much smaller context string, e.g., 10k chars, to be safe.
+        # Average 4 chars per token -> 10000 / 4 = 2500 tokens approx for this part.
+        # This still leaves room for the rest of the prompt and response.
+        GROQ_CONTEXT_CHAR_LIMIT = 10000 
+        is_groq = hasattr(current_llm, 'model_name') and 'groq' in current_llm.model_name.lower() 
+        if not is_groq and hasattr(current_llm, 'client') and hasattr(current_llm.client, 'base_url'): # Another way to check for Groq via client
+            is_groq = 'groq.com' in str(current_llm.client.base_url).lower()
+        
+        if is_groq and len(industry_context_str) > GROQ_CONTEXT_CHAR_LIMIT:
+            logger.warning(f"Industry context for Groq is too long ({len(industry_context_str)} chars). Truncating to {GROQ_CONTEXT_CHAR_LIMIT} chars.")
+            industry_context_str = industry_context_str[:GROQ_CONTEXT_CHAR_LIMIT] + "... [TRUNCATED DUE TO LENGTH]"
+
         try:
-            current_llm = llm_override or self.initial_llm
             chain = LLMChain(
                 llm=current_llm,
                 prompt=self.identify_paradigms_prompt
             )
-            response_text = await chain.arun(topic=topic, min_paradigms=3)
-            paradigms = json.loads(response_text)
+            response_text = await chain.arun(topic=topic, min_paradigms=self.min_paradigms, industry_context=industry_context_str)
+            paradigms = self._parse_llm_response_to_json(response_text, f"historical paradigms for {topic}")
             logger.info(f"Identified {len(paradigms)} historical paradigms for topic: {topic}")
             return paradigms
         except json.JSONDecodeError as e:
@@ -325,7 +414,7 @@ class ParadigmAnalyzer:
                 prompt=self.analyze_transitions_prompt
             )
             response_text = await chain.arun(paradigms=paradigms_text)
-            transitions = json.loads(response_text)
+            transitions = self._parse_llm_response_to_json(response_text, f"paradigm transitions for {len(paradigms)} paradigms")
             logger.info(f"Analyzed {len(transitions)} paradigm transitions.")
             return transitions
         except json.JSONDecodeError as e:
@@ -373,7 +462,7 @@ class ParadigmAnalyzer:
                 transitions=transitions_text,
                 min_lessons=3
             )
-            lessons = json.loads(response_text)
+            lessons = self._parse_llm_response_to_json(response_text, "historical lessons")
             logger.info(f"Extracted {len(lessons)} historical lessons.")
             return lessons
         except json.JSONDecodeError as e:
@@ -430,7 +519,7 @@ class ParadigmAnalyzer:
                 transitions=transitions_text,
                 lessons=lessons_text,
             )
-            future_paradigms = json.loads(response_text)
+            future_paradigms = self._parse_llm_response_to_json(response_text, f"future paradigms for {topic}")
             logger.info(f"Projected {len(future_paradigms)} future paradigms for {topic}.")
             return future_paradigms
         except json.JSONDecodeError as e:
@@ -494,6 +583,7 @@ class ParadigmAnalyzer:
     async def analyze_paradigms(
         self,
         topic: str,
+        industry_context: Optional[Dict[str, Any]] = None,
         llm_override: Optional[BaseChatModel] = None
     ) -> Dict[str, Any]:
         """
@@ -501,6 +591,7 @@ class ParadigmAnalyzer:
         
         Args:
             topic: Topic to analyze
+            industry_context: Optional industry context data
             llm_override: Optional language model override
             
         Returns:
@@ -512,7 +603,7 @@ class ParadigmAnalyzer:
         try:
             # Identify historical paradigms
             logger.info(f"Identifying historical paradigms for topic: {topic}")
-            paradigms = await self.identify_historical_paradigms(topic, llm_override=llm_override)
+            paradigms = await self.identify_historical_paradigms(topic, industry_context=industry_context, llm_override=llm_override)
             
             # Ensure we have at least min_paradigms
             if len(paradigms) < self.min_paradigms:

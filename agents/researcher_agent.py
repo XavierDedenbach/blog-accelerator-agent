@@ -28,7 +28,7 @@ import sys
 import httpx  # Added for async requests
 
 # Langchain imports
-from langchain_openai import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain_core.language_models.chat_models import BaseChatModel
 from openai import RateLimitError as OpenAIRateLimitError, AuthenticationError as OpenAIAuthenticationError
 try:
@@ -298,90 +298,76 @@ class ResearcherAgent:
 
         try:
             # Initialize FirecrawlClient only if server URL is provided
-            if self.firecrawl_server:
-                self.firecrawl_client = FirecrawlClient(
-            server_url=self.firecrawl_server,
-            brave_api_key=self.brave_api_key
-        )
-            else:
-                logger.warning(
-                    "Firecrawl server URL not provided, skipping client initialization")
-                self.firecrawl_client = None
+            self.firecrawl_client = FirecrawlClient(
+                server_url=self.firecrawl_server) if self.firecrawl_server else FirecrawlClient()
         except Exception as e:
             logger.warning(f"Failed to initialize FirecrawlClient: {e}")
             self.firecrawl_client = None
 
-        # Initialize research components if available
+        # Initialize analysis components
         try:
-            # Try to import and initialize IndustryAnalyzer
-            from agents.research import IndustryAnalyzer
-            self.industry_analyzer = IndustryAnalyzer(llm=self.llm, source_validator=self.source_validator)
+            self.industry_analyzer = IndustryAnalyzer(
+                llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized IndustryAnalyzer")
-        except (ImportError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Failed to initialize IndustryAnalyzer: {e}")
             self.industry_analyzer = None
 
         try:
-            # Try to import and initialize SolutionAnalyzer
-            from agents.research import SolutionAnalyzer
-            self.solution_analyzer = SolutionAnalyzer(llm=self.llm, source_validator=self.source_validator)
+            self.solution_analyzer = SolutionAnalyzer(
+                llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized SolutionAnalyzer")
-        except (ImportError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Failed to initialize SolutionAnalyzer: {e}")
             self.solution_analyzer = None
 
         try:
-            # Try to import and initialize ParadigmAnalyzer
-            from agents.research import ParadigmAnalyzer
-            self.paradigm_analyzer = ParadigmAnalyzer(llm=self.llm, source_validator=self.source_validator)
+            self.paradigm_analyzer = ParadigmAnalyzer(
+                llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized ParadigmAnalyzer")
-        except (ImportError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Failed to initialize ParadigmAnalyzer: {e}")
             self.paradigm_analyzer = None
 
         try:
-            # Try to import and initialize AudienceAnalyzer
-            from agents.research import AudienceAnalyzer
-            self.audience_analyzer = AudienceAnalyzer(llm=self.llm, source_validator=self.source_validator)
+            self.audience_analyzer = AudienceAnalyzer(
+                llm=self.llm, source_validator=self.source_validator)
             logger.info("Initialized AudienceAnalyzer")
-        except (ImportError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Failed to initialize AudienceAnalyzer: {e}")
             self.audience_analyzer = None
 
         try:
-            # Try to import and initialize AnalogyGenerator
-            from agents.research import AnalogyGenerator
             self.analogy_generator = AnalogyGenerator(
-                llm=self.llm,
+                llm=self.llm, 
                 source_validator=self.source_validator,
                 firecrawl_client=self.firecrawl_client
             )
             logger.info("Initialized AnalogyGenerator")
-        except (ImportError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Failed to initialize AnalogyGenerator: {e}")
             self.analogy_generator = None
 
         try:
-            # Try to import and initialize VisualAssetCollector
-            from agents.research import VisualAssetCollector
+            # Corrected initialization for VisualAssetCollector
+            primary_llm_model_name = "gpt-4o" # Default
+            if hasattr(self.llm, 'model_name'):
+                 primary_llm_model_name = self.llm.model_name
+            elif hasattr(self.llm, 'model'): # some langchain models use 'model'
+                 primary_llm_model_name = self.llm.model
 
-            # Check if we have the required dependencies
-            if self.firecrawl_client:
-                self.visual_asset_collector = VisualAssetCollector(
-                    llm=self.llm,  # Pass primary LLM
-                    openai_api_key=self.openai_api_key,
-                    firecrawl_client=self.firecrawl_client,
-                    source_validator=self.source_validator
-                )
-                logger.info("Initialized VisualAssetCollector")
-            else:
-                logger.warning("Skipping VisualAssetCollector initialization (missing Firecrawl client)")
-                self.visual_asset_collector = None
-        except (ImportError, Exception) as e:
+            self.visual_asset_collector = VisualAssetCollector(
+                openai_api_key=self.openai_api_key, # Pass the API key
+                firecrawl_client=self.firecrawl_client,
+                source_validator=self.source_validator,
+                model_name=primary_llm_model_name # Pass the model name from the primary LLM
+            )
+            logger.info("Initialized VisualAssetCollector")
+        except Exception as e:
             logger.warning(f"Failed to initialize VisualAssetCollector: {e}")
             self.visual_asset_collector = None
 
-        # Log to Opik if available
+        # Log to Opik MCP if server is configured
         self._log_to_opik("Researcher Agent initialized", "agent_init", {
             "mongodb_uri": self.db_client is not None,
             "brave_api_key": self.brave_api_key is not None,
@@ -731,8 +717,6 @@ class ResearcherAgent:
         async def citations_task():
             task_name = "citations"
             try:
-                # Note: The underlying source_validator.search_web might have
-                # its own retry/fallback logic if needed
                 citations_result = await self.search_citations(topic, count=10)
                 results[task_name] = citations_result
                 logger.info(f"Async Citations successful: Found {len(citations_result)} citations.")
@@ -745,54 +729,54 @@ class ResearcherAgent:
 
         # Helper function to run an LLM task with fallback and update state
         async def run_llm_task(task_name: str, task_func, *args):
-            # Allow modification of outer scope variables
-            nonlocal current_llm_provider_name, current_llm_instance
+            nonlocal current_llm_provider_name, current_llm_instance # Allow modification
 
-            if not getattr(self, f"{task_name}_analyzer", True) and task_name != "analogy":
-                if task_name == "analogy" and not self.analogy_generator:
-                    logger.warning(f"Skipping {task_name} task (generator not initialized)")
-                    errors[task_name] = "Generator not initialized"
-                    return
-                elif task_name != "analogy":
-                    logger.warning(f"Skipping {task_name} task (analyzer not initialized)")
-                    errors[task_name] = "Analyzer not initialized"
-                    return
+            analyzer_instance_name = f"{task_name}_analyzer" if task_name != "analogy" else "analogy_generator"
+            analyzer_instance = getattr(self, analyzer_instance_name, None)
+
+            if not analyzer_instance:
+                logger.warning(f"Skipping {task_name} task ({analyzer_instance_name} not initialized)")
+                errors[task_name] = f"{analyzer_instance_name} not initialized"
+                return
 
             task_result, succeeded_provider, succeeded_instance = await self._execute_with_fallback(
                 task_func,
-                current_llm_provider_name,  # Pass current provider name
-                *args  # Pass positional arguments for the task
+                current_llm_provider_name,
+                *args, # Pass base arguments for the task
                 # llm_override is handled inside _execute_with_fallback
             )
 
             if succeeded_provider:
                 results[task_name] = task_result
-                # Update current LLM state IF it changed
                 if succeeded_provider != current_llm_provider_name:
                     logger.info(f"Switching active LLM provider from {current_llm_provider_name} to {succeeded_provider} for subsequent tasks.")
                     current_llm_provider_name = succeeded_provider
                     current_llm_instance = succeeded_instance
-                # Log success count based on typical output structure
+                
                 count_info = ""
-                if task_name == 'industry' and isinstance(task_result, dict):
-                    count_info = f"Found {len(task_result.get('challenges', []))} challenges."
-                elif task_name == 'solution' and isinstance(task_result, dict):
-                    pro_count = len(task_result.get('pro_arguments', []))
-                    con_count = len(task_result.get('counter_arguments', []))
-                    count_info = f"Found {pro_count} pro / {con_count} con arguments."
-                elif task_name == 'paradigm' and isinstance(task_result, dict):
-                    hist_count = len(task_result.get('historical_paradigms', []))
-                    fut_count = len(task_result.get('future_paradigms', []))
-                    count_info = f"Found {hist_count} historical / {fut_count} future paradigms."
-                elif task_name == 'audience' and isinstance(task_result, dict):
-                    count_info = f"Found {len(task_result.get('audience_segments', []))} audience segments."
-                elif task_name == 'analogy' and isinstance(task_result, dict):
-                    gen_count = len(task_result.get('generated_analogies', []))
-                    ex_count = len(task_result.get('existing_analogies', []))
-                    count_info = f"Found {gen_count} generated / {ex_count} existing analogies."
+                if isinstance(task_result, dict):
+                    if task_name == 'industry':
+                        count_info = f"Found {len(task_result.get('challenges', []))} challenges."
+                    elif task_name == 'solution':
+                        pro_count = len(task_result.get('pro_arguments', []))
+                        con_count = len(task_result.get('counter_arguments', []))
+                        count_info = f"Found {pro_count} pro / {con_count} con arguments."
+                    elif task_name == 'paradigm':
+                        hist_count = len(task_result.get('historical_paradigms', []))
+                        fut_count = len(task_result.get('future_paradigms', []))
+                        count_info = f"Found {hist_count} historical / {fut_count} future paradigms."
+                    elif task_name == 'audience':
+                        count_info = f"Found {len(task_result.get('audience_segments', []))} audience segments."
+                    elif task_name == 'analogy':
+                        gen_count = len(task_result.get('generated_analogies', []))
+                        ex_count = len(task_result.get('existing_analogies', []))
+                        count_info = f"Found {gen_count} generated / {ex_count} existing analogies."
+                elif isinstance(task_result, list) and task_name in ['industry', 'solution', 'paradigm', 'audience', 'analogy']: # Fallback if structure is simpler
+                    count_info = f"Received {len(task_result)} items."
+
+
                 logger.info(f"Async {task_name.capitalize()} Analysis successful. {count_info}")
             else:
-                # Task failed even with fallback
                 error_msg = f"Task '{task_func.__name__}' failed after trying all providers."
                 logger.error(error_msg)
                 errors[task_name] = error_msg
@@ -800,26 +784,78 @@ class ResearcherAgent:
             logger.info(f"Async {task_name.capitalize()} task finished.")
             self._log_to_opik(f"{task_name.capitalize()} task finished", "task_complete", {"task": task_name, "success": task_name in results, "error": errors.get(task_name)})
 
-            # Visual Asset Task (Doesn't directly use LLM in the main call, but
-            # components might)
 
-        async def visual_asset_task():
+        # --- Orchestrate Tasks with Dependencies ---
+        logger.info("Starting Industry Analysis...")
+        if self.industry_analyzer:
+            await run_llm_task('industry', self.industry_analyzer.analyze_industry, topic)
+        else:
+            logger.warning("Skipping industry analysis as analyzer is not initialized.")
+            errors['industry'] = "IndustryAnalyzer not initialized"
+
+        # Prepare arguments for dependent tasks (Solution and Paradigm)
+        industry_challenges_data = results.get('industry', {}).get('challenges', [])
+        # Ensure challenges are a list of strings (names) if SolutionAnalyzer expects that, or pass the dicts
+        # Based on SolutionAnalyzer.generate_pro_arguments, it expects List[str] which is then "\n".join(challenges)
+        # The industry_analyzer returns a list of challenge dicts. We need to extract names or adapt.
+        # For now, let's assume SolutionAnalyzer can handle the dicts or we adapt it later.
+        # The key is to pass the *data* from results['industry'].
+        
+        # The industry_context for ParadigmAnalyzer will be the entire industry result dictionary
+        industry_context_for_paradigm = results.get('industry')
+
+
+        # Define tasks that depend on Industry Analysis, plus other independent tasks
+        dependent_and_other_llm_tasks = []
+        if self.solution_analyzer:
+            # Ensure challenges are correctly formatted for solution_analyzer.
+            # The SolutionAnalyzer's prompt takes a string of challenges, so we extract names.
+            challenges_for_solution = [ch.get('name', 'Unnamed Challenge') for ch in industry_challenges_data]
+            dependent_and_other_llm_tasks.append(
+                ('solution', self.solution_analyzer.analyze_solution,
+                 metadata.get('proposed_solution', 'Proposed Solution'), # solution_title
+                 topic,                                                  # topic
+                 challenges_for_solution                                 # challenges (list of strings)
+                )
+            )
+        if self.paradigm_analyzer:
+            dependent_and_other_llm_tasks.append(
+                ('paradigm', self.paradigm_analyzer.analyze_paradigms, 
+                 topic, 
+                 industry_context_for_paradigm # Pass industry context
+                )
+            )
+        if self.audience_analyzer:
+            dependent_and_other_llm_tasks.append(
+                 ('audience', self.audience_analyzer.analyze_audience, topic)
+            )
+        if self.analogy_generator:
+            dependent_and_other_llm_tasks.append(
+                 ('analogy', self.analogy_generator.generate_analogies, topic)
+            )
+
+        # Create coroutines for these tasks
+        llm_coroutines = [
+            run_llm_task(*task_def) for task_def in dependent_and_other_llm_tasks
+        ]
+        
+        # Add non-LLM tasks (citations is independent)
+        other_coroutines = [citations_task()]
+        
+        # Run dependent LLM tasks and other independent tasks together
+        await asyncio.gather(*(llm_coroutines + other_coroutines))
+
+        # Visual Asset Task (depends on solution, paradigm, analogy)
+        # This should run after the above tasks have populated 'results'
+        if self.visual_asset_collector:
+            logger.info("Starting Visual Asset Collection...")
             task_name = "visuals"
-            if not self.visual_asset_collector:
-                logger.warning("Skipping visual asset collection (collector not initialized)")
-                errors[task_name] = "Collector not initialized"
-                return
             try:
-                # Assume visual asset collector might use LLM internally via its components,
-                # but the main call doesn't need the llm_override directly.
-                # If VAC needs direct LLM interaction with fallback, its
-                # methods would need adjustment.
-                visual_result = await self.visual_asset_collector.collect_visuals(
+                visual_result = await self.visual_asset_collector.analyze_visual_assets(
                     topic=topic,
-                    # Pass results from previous tasks
                     solution_data=results.get('solution'),
-                    paradigm_data=results.get('paradigm'),
-                    analogy_data=results.get('analogy')
+                    paradigm_data=results.get('paradigm')
+                    # analogy_data is not an expected argument for analyze_visual_assets
                 )
                 results[task_name] = visual_result
                 count = visual_result.get('stats', {}).get('total_collected', 0)
@@ -830,39 +866,20 @@ class ResearcherAgent:
             finally:
                 logger.info("Async Visual Asset Collection task finished.")
                 self._log_to_opik("Visual Asset task finished", "task_complete", {"task": task_name, "success": task_name in results, "error": errors.get(task_name)})
+        else:
+            logger.warning("Skipping visual asset collection (collector not initialized)")
+            errors['visuals'] = "Collector not initialized"
 
-        # --- Define and Run Tasks Concurrently ---
-
-        # Define tasks using the helper
-        llm_tasks_to_run = [
-             ('industry', self.industry_analyzer.analyze_industry, topic),
-             ('solution', self.solution_analyzer.analyze_solution,
-              metadata.get('proposed_solution', 'Proposed Solution')),
-             ('paradigm', self.paradigm_analyzer.analyze_paradigms, topic),
-             ('audience', self.audience_analyzer.analyze_audience, topic),
-             ('analogy', self.analogy_generator.generate_analogies, topic),
-        ]
-
-        # Create coroutines for LLM tasks
-        llm_coroutines = [
-            run_llm_task(*task_def) for task_def in llm_tasks_to_run if getattr(self, f"{task_def[0]}_analyzer", True) or task_def[0] == 'analogy'
-        ]
-
-        # Add non-LLM and visual tasks
-        other_tasks = [citations_task()]
-        if self.visual_asset_collector:
-             other_tasks.append(visual_asset_task())
-
-        # Combine all tasks
-        all_tasks = llm_coroutines + other_tasks
-
-        await asyncio.gather(*all_tasks)
 
         # --- Finalize and Return ---
-
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
-        completion_percentage = (len(results) / len(all_tasks)) * 100
+        
+        # Calculate completion percentage based on all potential tasks
+        # (industry, solution, paradigm, audience, analogy, citations, visuals)
+        total_possible_tasks = 7 
+        successful_tasks_count = len(results)
+        completion_percentage = (successful_tasks_count / total_possible_tasks) * 100 if total_possible_tasks > 0 else 0
 
         logger.info(f"Async Research orchestration complete. Completion: {completion_percentage:.0f}%.")
         logger.info(f"Errors: {len(errors)}")

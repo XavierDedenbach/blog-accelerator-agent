@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import json
 from datetime import datetime
 import asyncio
+import re
 
 from langchain.callbacks.manager import CallbackManagerForChainRun
 from langchain.chains.llm import LLMChain
@@ -111,6 +112,9 @@ class AudienceAnalyzer:
         self.initial_llm = llm
         self.source_validator = source_validator
         self._init_prompts()
+        # Added: Pre-compile regex patterns for efficiency
+        self.json_md_block_pattern = re.compile(r"```(?:json)?\\s*(.*?)\\s*```", re.DOTALL | re.IGNORECASE)
+        self.think_block_pattern = re.compile(r"^\\s*<think>.*?</think>\\s*", re.DOTALL | re.IGNORECASE)
     
     def _init_prompts(self):
         """Initialize prompts for audience analysis."""
@@ -303,6 +307,78 @@ class AudienceAnalyzer:
             """
         )
     
+    # Added helper method
+    def _parse_llm_response_to_json(self, response_text: str, context: str) -> Any:
+        """Helper to parse LLM JSON response, stripping markdown and handling errors."""
+        logger.debug(f"Original LLM response for {context} (length {len(response_text)}): {response_text[:500]}...")
+        json_str = None
+
+        # 1. Try to find a JSON markdown block and extract its content
+        md_match = self.json_md_block_pattern.search(response_text)
+        if md_match:
+            json_str = md_match.group(1).strip()
+            logger.debug(f"Extracted from JSON markdown block for {context}: {json_str[:500]}...")
+        else:
+            # 2. If no markdown block, try to strip common non-JSON prefixes/suffixes
+            # Remove <think> blocks first
+            temp_str = self.think_block_pattern.sub("", response_text).strip()
+            
+            # Attempt to find the start and end of a JSON object/array
+            # This is a common pattern if the LLM doesn't use markdown blocks
+            json_start_chars = ['{', '[']
+            json_end_chars = ['}', ']']
+            
+            start_index = -1
+            end_index = -1
+
+            for char_index, char_val in enumerate(temp_str):
+                if char_val in json_start_chars:
+                    start_index = char_index
+                    break
+            
+            if start_index != -1:
+                # Look for the corresponding closing character from the end
+                # This is a simplistic approach and might fail for nested structures if junk is outside
+                # but better than just checking startswith
+                looking_for = '}' if temp_str[start_index] == '{' else ']'
+                for char_index in range(len(temp_str) - 1, start_index, -1):
+                    if temp_str[char_index] == looking_for:
+                        end_index = char_index
+                        break
+                
+                if end_index != -1:
+                    json_str = temp_str[start_index : end_index+1]
+                    logger.debug(f"Extracted by finding start/end chars for {context}: {json_str[:500]}...")
+                else:
+                    logger.warning(f"Found JSON start but no clear end for {context}. Trying with stripped <think> text.")
+                    json_str = temp_str # Use the <think> stripped version
+            else:
+                # 3. Fallback: assume the whole original response (stripped) was intended to be JSON
+                logger.warning(f"No JSON markdown block or clear JSON start found for {context}. Using stripped original response as a last resort.")
+                json_str = response_text.strip()
+
+        if not json_str:
+            error_message = f"Could not extract any potential JSON string for {context}. Original response (first 300): '{response_text[:300]}'."
+            logger.error(error_message)
+            raise AudienceAnalysisError(error_message)
+
+        logger.debug(f"Attempting to parse extracted JSON string for {context} (length {len(json_str)}): {json_str[:500]}...")
+        try:
+            # Final attempt to clean just before parsing: remove trailing commas from objects/arrays
+            # as this is a common LLM error.
+            cleaned_json_str = re.sub(r",(\s*[}\]])", r"\1", json_str) # remove trailing commas
+            if cleaned_json_str != json_str:
+                logger.debug(f"Removed trailing commas. New string: {cleaned_json_str[:500]}...")
+            
+            return json.loads(cleaned_json_str)
+        except json.JSONDecodeError as e:
+            # Log more details for the decode error
+            # Find the position of the error if possible to help debug
+            # error_pos_debug = json_str[max(0, e.pos - 15) : e.pos + 15]
+            error_message = f"JSON Parsing Error for {context}: {e}. Problematic text around char {e.pos} (showing 30 chars before and after): '...{json_str[max(0, e.pos-30):e.pos+30]}...'. Extracted string was (first 500): '{json_str[:500]}'. Original response (first 500): '{response_text[:500]}'."
+            logger.error(error_message)
+            raise AudienceAnalysisError(error_message) from e
+
     async def identify_segments(
         self,
         topic: str,
@@ -338,7 +414,8 @@ class AudienceAnalyzer:
             )
             
             # Parse JSON response
-            segments = json.loads(response)["audience_segments"]
+            parsed_data = self._parse_llm_response_to_json(response, f"audience segments for {topic}")
+            segments = parsed_data if isinstance(parsed_data, list) else parsed_data.get("audience_segments", [])
             
             logger.info(f"Identified {len(segments)} audience segments for topic: {topic}")
             return segments
@@ -382,7 +459,7 @@ class AudienceAnalyzer:
             )
             
             # Parse JSON response
-            needs = json.loads(response)
+            needs = self._parse_llm_response_to_json(response, f"needs for segment {segment_name}")
             
             logger.info(f"Analyzed needs for segment: {segment_name}")
             return needs
@@ -427,7 +504,7 @@ class AudienceAnalyzer:
             )
             
             # Parse JSON response
-            knowledge = json.loads(response)
+            knowledge = self._parse_llm_response_to_json(response, f"knowledge for segment {segment_name}")
             
             logger.info(f"Evaluated knowledge for segment: {segment_name}")
             return knowledge
@@ -487,7 +564,7 @@ class AudienceAnalyzer:
                     )
                     
                     # Parse JSON response
-                    strategies = json.loads(response)
+                    strategies = self._parse_llm_response_to_json(response, f"strategies for segment {segment_name}")
                     
                     logger.info(f"Recommended {len(strategies)} strategies for segment: {segment_name}")
                     return strategies
