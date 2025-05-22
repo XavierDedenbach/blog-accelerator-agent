@@ -64,6 +64,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    command: --default-authentication-plugin=mysql_native_password
 
   opik:
     image: ghcr.io/comet-ml/opik/opik-backend:1.7.26-1798
@@ -71,6 +72,17 @@ services:
     restart: unless-stopped
     ports:
       - "7000:7000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=opik
+      - DB_USER=opik
+      - DB_PASSWORD=opikpassword
+      - JDBC_URL=jdbc:mysql://mysql:3306/opik?useSSL=false&allowPublicKeyRetrieval=true
+      - DISABLE_DATABASE=true
 
   firecrawl:
     image: mcp/firecrawl:latest
@@ -78,6 +90,10 @@ services:
     restart: unless-stopped
     ports:
       - "4000:4000"
+    environment:
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY} 
+    env_file:
+      - .env
 
 volumes:
   mongo_data:
