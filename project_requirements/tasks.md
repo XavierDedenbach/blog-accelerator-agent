@@ -128,16 +128,61 @@ blog-accelerator-agent/
   * Add validation for request/response schemas
 * **Expected Output**: Documented API with test coverage
 
-### 8. Docker Container Optimization
-* **Already Implemented**: Basic Docker setup
-* **TODO**: Optimize Docker configuration for production use
-* **Implementation Details**:
-  * Implement multi-stage builds to reduce image size
-  * Add health checks and proper signal handling
-  * Configure resource limits
-  * Set up proper volume mounts for persistent data
-  * Ensure all environment variables are properly handled
-* **Expected Output**: Production-ready Docker configuration
+### Task 8: Transition to Dockerized Environment and Production Optimization
+
+*   **Objective:** Fully transition the Blog Accelerator Agent and its dependent services (MongoDB, Firecrawl, Opik) to a Dockerized environment using Docker Compose. Optimize the Docker setup for development efficiency and prepare for production deployment. Ensure all components function correctly within this containerized setup.
+
+*   **8.1: Verify and Refine `blog-agent` Dockerfile**
+    *   **Responsibility:** Agent
+    *   **Details:**
+        *   Review the existing `Dockerfile` for the `blog-agent` service.
+        *   Implement multi-stage builds to minimize the final image size (e.g., separate build stage for installing dependencies and a smaller runtime stage).
+        *   Ensure `requirements.txt` is efficiently copied and dependencies are installed correctly.
+        *   Optimize layer caching.
+        *   Verify that the application starts correctly within the container (e.g., FastAPI server runs on the specified port).
+    *   **Expected Output:** An optimized `Dockerfile` for the `blog-agent` that produces a smaller, more efficient image.
+
+*   **8.2: Enhance `docker-compose.yml` for Robustness and Inter-Service Communication**
+    *   **Responsibility:** Agent
+    *   **Details:**
+        *   Confirm that all service names (`mongo`, `opik`, `firecrawl`) are correctly used by the `blog-agent` service for internal communication (e.g., `MONGODB_URI=mongodb://mongo:27017`).
+        *   Add health checks for `mongo`, `opik`, and `firecrawl` services to ensure `blog-agent` only starts or attempts to connect when its dependencies are ready.
+        *   Review and confirm volume mounts for persistent data (`mongo_data`, `./logs`, `./data`) are correctly configured and functional.
+        *   Ensure graceful shutdown: Add proper signal handling in the `blog-agent` (if not already present) and ensure `docker-compose down` stops containers cleanly.
+    *   **Expected Output:** An updated `docker-compose.yml` with health checks, verified service networking, and robust data persistence.
+
+*   **8.3: Application Configuration for Dockerized Services**
+    *   **Responsibility:** Agent
+    *   **Details:**
+        *   Audit the `ResearcherAgent` and any other relevant parts of the codebase (e.g., API clients, utility modules) to ensure they correctly use the environment variables for service URLs (e.g., `FIRECRAWL_SERVER`, `OPIK_SERVER`, `MONGODB_URI`) passed by `docker-compose.yml`.
+        *   Ensure that default values in the code (if any) do not override these environment variables when running in Docker.
+        *   Modify `run_researcher_with_env.py` or provide instructions if specific environment variables need to be set differently when running via `docker exec` or if it's intended primarily for local runs outside Docker.
+    *   **Expected Output:** Application code that seamlessly connects to services using Docker Compose service discovery.
+
+*   **8.4: Environment Variable Management and Security**
+    *   **Responsibility:** Agent (guidance), User (implementation)
+    *   **Details:**
+        *   Confirm that all necessary environment variables (API keys, service URLs) are defined in `.env` and correctly passed to the `blog-agent` service via the `environment` section in `docker-compose.yml`.
+        *   **Agent:** Will list any missing URLs or API keys based on the current codebase and `docker-compose.yml` during this task execution.
+        *   **User:** Will ensure `.env` file is populated with the actual secrets.
+        *   Advise on best practices for not committing `.env` files and using a `.env.example` for guidance.
+    *   **Expected Output:** Clear documentation and setup for managing environment variables securely, and an updated `docker-compose.yml` if `BRAVE_API_KEY` and `OPENROUTER_API_KEY` need to be passed.
+
+*   **8.5: Resource Limit Configuration (Placeholder for Production)**
+    *   **Responsibility:** Agent (guidance), User (future implementation for production)
+    *   **Details:**
+        *   Research and recommend sensible default resource limits (CPU, memory) for each service in `docker-compose.yml`.
+        *   Explain that these might need tuning based on actual usage in a production environment.
+    *   **Expected Output:** Guidance on how to configure resource limits in `docker-compose.yml` for future production deployment.
+
+*   **8.6: Comprehensive Testing in Dockerized Environment**
+    *   **Responsibility:** User (execution), Agent (support)
+    *   **Details:**
+        *   User to run `docker-compose up --build -d` followed by thorough testing of all `ResearcherAgent` functionalities and API endpoints.
+        *   User to verify database interactions, Firecrawl calls, and Opik logging all work correctly within the Docker network.
+        *   User to report any issues encountered.
+        *   Agent to assist in debugging any issues that arise from the Dockerization process.
+    *   **Expected Output:** Confirmation that the entire system operates correctly within the Docker Compose setup.
 
 ### 9. Sequential Thinking Debug Dashboard
 * **TODO**: Create debug visualization for sequential thinking steps

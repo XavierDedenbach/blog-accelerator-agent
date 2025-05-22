@@ -10,14 +10,22 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
       - MONGODB_URI=mongodb://mongo:27017
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - OPIK_SERVER=http://opik:7000
       - FIRECRAWL_SERVER=http://firecrawl:4000
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+    #command: ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    command: sh -c "find /app -type f -name '*.py' | sort && python -m uvicorn api.main:app --host 0.0.0.0 --port 8080"
     depends_on:
-      - mongo
-      - opik
-      - firecrawl
+      mongo:
+        condition: service_healthy
+      opik:
+        condition: service_started # Using service_started as a fallback if health check is tricky
+      firecrawl:
+        condition: service_started # Using service_started as a fallback
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
@@ -30,16 +38,42 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=opik
+      - MYSQL_USER=opik
+      - MYSQL_PASSWORD=opikpassword
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   opik:
-    image: opik/opik-mcp:latest
+    image: ghcr.io/comet-ml/opik/opik-backend:1.7.26-1798
     container_name: opik
     restart: unless-stopped
     ports:
       - "7000:7000"
 
   firecrawl:
-    image: firecrawl/firecrawl-mcp:latest
+    image: mcp/firecrawl:latest
     container_name: firecrawl
     restart: unless-stopped
     ports:
@@ -47,3 +81,4 @@ services:
 
 volumes:
   mongo_data:
+  mysql_data:
